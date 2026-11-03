@@ -31,7 +31,7 @@ class ControlsExt(ModelStateBase):
     self.CP_SP = messaging.log_from_bytes(params.get("CarParamsSP", block=True), custom.CarParamsSP)
     cloudlog.info("controlsd_ext got CarParamsSP")
 
-    self.sm_services_ext = ['radarState', 'selfdriveStateSP', 'longitudinalPlanSP']
+    self.sm_services_ext = ['radarState', 'selfdriveStateSP']
     self.pm_services_ext = ['carControlSP']
 
   def initialize_lateral_control(self, lac, CI, dt):
@@ -103,31 +103,6 @@ class ControlsExt(ModelStateBase):
     CC_SP.intelligentCruiseButtonManagement.state = icbm_src.state
     CC_SP.intelligentCruiseButtonManagement.sendButton = icbm_src.sendButton
     CC_SP.intelligentCruiseButtonManagement.vTarget = icbm_src.vTarget
-
-    # Smart Cruise Control state
-    scc_src = sm['longitudinalPlanSP'].smartCruiseControl
-    CC_SP.smartCruiseControl.visionState = scc_src.vision.state
-    CC_SP.smartCruiseControl.mapState = scc_src.map.state
-
-    # Speed Limit Assist state
-    sl_src = sm['longitudinalPlanSP'].speedLimit
-    CC_SP.speedLimit.assistState = sl_src.assist.state
-    CC_SP.speedLimit.speedLimitFinalLast = sl_src.resolver.speedLimitFinalLast
-
-    # Lane change state
-    meta = sm['modelV2'].meta
-    CC_SP.laneChange.state = str(meta.laneChangeState)
-    CC_SP.laneChange.direction = str(meta.laneChangeDirection)
-
-    # Driver monitoring alert
-    dm = sm['driverMonitoringState']
-    CC_SP.driverMonitoring.alertLevel = dm.alertLevel.raw
-    CC_SP.driverMonitoring.visionPolicy = dm.activePolicy == 'vision'
-
-    # Planner following a lead, the model path (e2e) wins often while following so count it when there is a lead
-    long_plan = sm['longitudinalPlan']
-    CC_SP.leadFollowing = str(long_plan.longitudinalPlanSource) in ('lead0', 'lead1', 'lead2') or \
-                          (str(long_plan.longitudinalPlanSource) == 'e2e' and long_plan.hasLead)
 
     return CC_SP
 

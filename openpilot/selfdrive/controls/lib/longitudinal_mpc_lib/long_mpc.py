@@ -57,14 +57,6 @@ COMFORT_BRAKE = 2.5
 STOP_DISTANCE = 6.0
 MIN_X_LEAD_FACTOR = 0.5
 
-# aggressive follows close to stock Hyundai SCC closest setting: 2.4 m stopped (stock 2.4), 16.3 m @ 31 mph (stock 14.8), 22 m @ 40 (20.2), 27.5 m @ 48 (25.2)
-# the MPC settles ~0.8 m short of its target at standstill, so a 3.2 m target stops at ~2.4 m
-# the short stop gap fades out by 10 m/s and moving gaps are ~0.1 s over stock: exact stock gaps crash in sim when the lead brakes 2 m/s^2 to a stop
-AGGRESSIVE_STOP_DISTANCE_BP = [0., 3., 10.]
-AGGRESSIVE_STOP_DISTANCE_V = [3.2, 3.2, STOP_DISTANCE]
-AGGRESSIVE_T_FOLLOW_BP = [0., 10., 14., 16., 18., 20., 21.3, 30.]
-AGGRESSIVE_T_FOLLOW_V = [0.74, 0.74, 0.74, 0.81, 0.90, 0.945, 1.0, 1.1]
-
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
   if personality==log.LongitudinalPersonality.relaxed:
     return 1.0
@@ -317,11 +309,6 @@ class LongitudinalMpc:
 
   def update(self, radarstate, personality=log.LongitudinalPersonality.standard):
     t_follow = get_T_FOLLOW(personality)
-    stop_distance_offset = 0.
-    if personality == log.LongitudinalPersonality.aggressive:
-      t_follow = float(np.interp(self.x0[1], AGGRESSIVE_T_FOLLOW_BP, AGGRESSIVE_T_FOLLOW_V))
-      # STOP_DISTANCE is compiled into the solver, so move the lead forward instead
-      stop_distance_offset = STOP_DISTANCE - float(np.interp(self.x0[1], AGGRESSIVE_STOP_DISTANCE_BP, AGGRESSIVE_STOP_DISTANCE_V))
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
     lead_xv_1 = self.process_lead(radarstate.leadTwo)
@@ -329,8 +316,8 @@ class LongitudinalMpc:
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance
     # and then treat that as a stopped car/obstacle at this new distance.
-    lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1]) + stop_distance_offset
-    lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1]) + stop_distance_offset
+    lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1])
+    lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1])
 
     x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle])
     self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
