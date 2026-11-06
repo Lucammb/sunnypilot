@@ -127,6 +127,7 @@ procs = [
   PythonProcess("modeld", "openpilot.selfdrive.modeld.modeld", and_(only_onroad, is_stock_model)),
   PythonProcess("navd", "openpilot.selfdrive.navigation.navd", navigation),
   PythonProcess("mapsd", "openpilot.selfdrive.navigation.mapsd", navigation),
+  PythonProcess("phone_link", "openpilot.lightpilot.phone_link", always_run),  # lightpilot: destination from the phone app
   PythonProcess("dmonitoringmodeld", "openpilot.selfdrive.modeld.dmonitoringmodeld", driverview, enabled=(WEBCAM or not PC)),
 
   PythonProcess("sensord", "openpilot.system.sensord.sensord", only_onroad, enabled=not PC),
