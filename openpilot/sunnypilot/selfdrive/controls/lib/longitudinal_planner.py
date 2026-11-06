@@ -8,6 +8,7 @@ See the LICENSE.md file in the root directory for more details.
 from openpilot.cereal import messaging, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
+from openpilot.lightpilot.speed_cap import NavSpeedCap
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
@@ -33,6 +34,7 @@ class LongitudinalPlannerSP:
     self.e2e_alerts_helper = E2EAlertsHelper()
     self.accel_boost_sp = AccelBoostSP()
     self.openpilot_longitudinal = CP.openpilotLongitudinalControl
+    self.lp_nav_cap = NavSpeedCap()  # lightpilot: speed cap before roundabouts, turns and stop signs
 
     self.output_v_target = 0.
     self.output_a_target = 0.
@@ -65,6 +67,9 @@ class LongitudinalPlannerSP:
 
     self.source = min(targets, key=lambda k: targets[k][0])
     self.output_v_target, self.output_a_target = targets[self.source]
+
+    # lightpilot: navigation speed cap. It can only lower the target; the driver's gas pedal overrides it as for any target.
+    self.output_v_target, self.output_a_target = self.lp_nav_cap.update(CS.vEgo, self.output_v_target, self.output_a_target)
     return self.output_v_target, self.output_a_target
 
   def update(self, sm: messaging.SubMaster) -> None:
