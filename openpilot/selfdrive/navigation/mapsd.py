@@ -13,6 +13,8 @@ from openpilot.selfdrive.navigation.pmtiles import PMTiles
 from openpilot.selfdrive.navigation.renderer import SIZE, MapRenderer
 from openpilot.selfdrive.navigation.route import RouteTracker
 from openpilot.selfdrive.navigation.tiles import RemoteTiles
+from openpilot.lightpilot.map_tiles import ProtomapsTiles
+from openpilot.lightpilot.config import use_comma_tiles
 
 RETRY_SECONDS = 10
 
@@ -38,7 +40,7 @@ class MapsD:
     try:
       if self.tracker is not None and now >= self.retry_at:
         if self.renderer is None:
-          self.renderer = MapRenderer(PMTiles(RemoteTiles()))
+          self.renderer = MapRenderer(PMTiles(RemoteTiles() if use_comma_tiles() else ProtomapsTiles()))  # lightpilot: no comma server on a Konik
         if not self.prefetched:
           # TODO: fetch the tiles more intelligently on demand
           # Every tile the route can show is fetched up front, so each render below is a cache hit.
