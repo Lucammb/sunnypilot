@@ -132,3 +132,18 @@ class TestSetDestination(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+class TestMapSource(unittest.TestCase):
+  def test_comma_tiles_off_by_default_and_switchable(self):
+    import json
+    import tempfile
+    from pathlib import Path
+    from openpilot.lightpilot.config import use_comma_tiles
+    with tempfile.TemporaryDirectory() as d:
+      path = Path(d) / 'config.json'
+      self.assertFalse(use_comma_tiles(path))  # no file
+      path.write_text(json.dumps({'map': {'comma_tiles': True}}))
+      self.assertTrue(use_comma_tiles(path))
+      path.write_text('not json')
+      self.assertFalse(use_comma_tiles(path))
