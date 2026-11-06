@@ -114,6 +114,7 @@ class RouteEngine:
       'steps': 'true',
       'banner_instructions': 'true',
       'alternatives': 'false',
+      'roundabout_exits': 'true',  # lightpilot: the roundabout step ends at the exit, so it is the ring only
       'language': lang,
     }
     if self.last_bearing is not None:
