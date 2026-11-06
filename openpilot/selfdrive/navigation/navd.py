@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import os
-
 import numpy as np
 import requests
 
@@ -9,6 +7,8 @@ from openpilot.common.api import API_HOST, Api
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
+from openpilot.lightpilot import route_zones
+from openpilot.lightpilot.config import load_mapbox_token
 from openpilot.selfdrive.navigation.helpers import latest_gps_source
 from openpilot.selfdrive.navigation.route import along_path, local_meters
 
@@ -50,7 +50,10 @@ class RouteEngine:
     self.recompute_hold = 0
     self.reroute_counter = 0
 
-    self.mapbox_token = os.environ.get("MAPBOX_TOKEN")
+    self.lp_zones: list[dict] = []  # lightpilot: roundabouts, turns, stop signs... along the route
+    self.lp_step_starts: list[float] = []
+
+    self.mapbox_token = load_mapbox_token()  # lightpilot: $MAPBOX_TOKEN or /data/lightpilot/mapbox_token
     self.api = Api(self.params.get("DongleId")) if self.mapbox_token is None else None
     self.mapbox_host = "https://api.mapbox.com" if self.mapbox_token is not None else API_HOST.rstrip('/') + '/v1/nav'
 
@@ -95,7 +98,6 @@ class RouteEngine:
   def calculate_route(self, destination):
     assert self.last_position is not None
     cloudlog.warning(f"Calculating route {self.last_position} -> {destination}")
-    self.nav_destination = destination
 
     lang = self.params.get('LanguageSetting')
     if lang is not None:
@@ -130,13 +132,18 @@ class RouteEngine:
         self.route = r['routes'][0]['legs'][0]['steps']
         self.route_geometry = [np.array(step['geometry']['coordinates'], dtype=np.float64).reshape((-1, 2)) for step in self.route]
         self.step_idx = 0
+        self.nav_destination = destination
+        self.update_lightpilot_route()
       else:
         cloudlog.warning("Got empty route response")
         self.clear_route()
 
     except requests.exceptions.RequestException:
       cloudlog.exception("failed to get route")
-      self.clear_route()
+      # lightpilot: a network drop (tunnel, router reconnecting) must not erase a good route. Keep it, along with the
+      # destination it belongs to, so that a new destination or a reroute is retried after RECOMPUTE_HOLD.
+      if self.route is None:
+        self.clear_route()
 
   def send_instruction(self):
     msg = messaging.new_message('navInstruction', valid=True)
@@ -144,6 +151,7 @@ class RouteEngine:
     if self.step_idx is None:
       msg.valid = False
       self.pm.send('navInstruction', msg)
+      route_zones.write_zones([])  # lightpilot
       return
 
     assert self.route is not None and self.route_geometry is not None and self.last_position is not None
@@ -167,6 +175,7 @@ class RouteEngine:
     msg.navInstruction.timeRemaining = step['duration'] * remaining + sum(s['duration'] for s in future)
 
     self.pm.send('navInstruction', msg)
+    self.write_lightpilot_zones(along_geometry)
 
     # Transition to next route segment
     if distance_to_maneuver_along_geometry < -MANEUVER_TRANSITION_THRESHOLD:
@@ -192,6 +201,24 @@ class RouteEngine:
     self.route_geometry = None
     self.step_idx = None
     self.nav_destination = None
+    self.lp_zones, self.lp_step_starts = [], []
+
+  def update_lightpilot_route(self):
+    """lightpilot: find the zones (roundabouts, turns, stop signs) on a new route. Must never break navd."""
+    try:
+      self.lp_zones = route_zones.extract_zones(self.route, self.route_geometry)
+      self.lp_step_starts = route_zones.step_starts(self.route)
+    except Exception:
+      cloudlog.exception("lightpilot: failed to extract route zones")
+      self.lp_zones, self.lp_step_starts = [], []
+
+  def write_lightpilot_zones(self, along_geometry: float):
+    """lightpilot: publish the zones ahead of the car, as distances, for the longitudinal planner."""
+    try:
+      progress = self.lp_step_starts[self.step_idx] + along_geometry
+      route_zones.write_zones(route_zones.zones_ahead(self.lp_zones, progress))
+    except Exception:
+      cloudlog.exception("lightpilot: failed to write route zones")
 
   def should_recompute(self):
     if self.step_idx is None:
