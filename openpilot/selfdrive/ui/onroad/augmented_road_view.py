@@ -8,6 +8,7 @@ from openpilot.selfdrive.ui.onroad.alert_renderer import AlertRenderer
 from openpilot.selfdrive.ui.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
+from openpilot.selfdrive.ui.onroad.navigation import NavigationPanel
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
@@ -56,6 +57,7 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
     self._hud_renderer = HudRenderer()
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
+    self._navigation = NavigationPanel()  # lightpilot
 
   def _render(self, rect):
     # Only render when system is started to avoid invalid data access
@@ -66,6 +68,12 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
 
     # Update calibration before rendering
     self._update_calibration()
+
+    # lightpilot: with a destination set, the left half is the road view and the right half the navigation map
+    full_rect = rect
+    show_navigation = ui_state.navigation_enabled and ui_state.nav_destination_set
+    if show_navigation:
+      rect = rl.Rectangle(full_rect.x, full_rect.y, full_rect.width / 2, full_rect.height)
 
     # Create inner content area with border padding
     self._content_rect = rl.Rectangle(
@@ -102,6 +110,13 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
 
     # Draw colored border based on driving state
     self._draw_border(rect)
+
+    if show_navigation:
+      self._navigation.render(rl.Rectangle(rect.x + rect.width, full_rect.y, full_rect.width - rect.width, full_rect.height))
+
+  def close(self):
+    self._navigation.close()
+    super().close()
 
   def _handle_mouse_press(self, _):
     if self._click_callback is not None:
