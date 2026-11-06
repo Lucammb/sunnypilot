@@ -336,8 +336,17 @@ class TestRouteEngine(unittest.TestCase):
     self.assertIsNone(self.engine.route)
     self.assertNotIn('NavDestination', self.values)
 
-  def test_failed_request_clears_route(self):
+  def test_failed_request_keeps_route(self):
+    # lightpilot: a failed request (network drop) keeps the last good route; with no route yet there is nothing to keep
     self.load_route()
+    self.response.raise_for_status.side_effect = requests.HTTPError('test failure')
+    self.load_route()
+    self.assertIsNotNone(self.engine.route)
+    self.assertEqual(len(self.last_message('navRoute').navRoute.coordinates), 5)
+    self.engine.send_instruction()
+    self.assertTrue(self.last_message('navInstruction').valid)
+
+  def test_failed_first_request_has_no_route(self):
     self.response.raise_for_status.side_effect = requests.HTTPError('test failure')
     self.load_route()
     self.assertIsNone(self.engine.route)
