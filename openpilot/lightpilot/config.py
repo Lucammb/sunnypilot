@@ -19,3 +19,12 @@ def load_mapbox_token(path: Path | None = None) -> str | None:
   except OSError:
     pass
   return None
+
+
+def use_comma_tiles(path: Path | None = None) -> bool:
+  """Whether the map should use comma's tile server; off by default, set {"map": {"comma_tiles": true}} in config.json."""
+  import json
+  try:
+    return bool(json.loads((path or LIGHTPILOT_DIR / "config.json").read_text()).get("map", {}).get("comma_tiles", False))
+  except (OSError, ValueError, AttributeError):
+    return False
