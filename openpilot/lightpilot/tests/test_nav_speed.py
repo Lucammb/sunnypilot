@@ -53,6 +53,12 @@ class TestZones(unittest.TestCase):
     route = [straight_step(100, 0, maneuver={'type': 'turn', 'modifier': 'straight'}), straight_step(100, 100, maneuver={'type': 'continue'})]
     self.assertEqual(route_zones.extract_zones(route, [np.array(s['geometry']['coordinates']) for s in route]), [])
 
+  def test_long_roundabout_step_is_capped(self):
+    # a route without roundabout_exits: the roundabout step runs on to the next maneuver (585 m)
+    route = [straight_step(20, 0, maneuver={'type': 'depart'}), straight_step(585, 20, maneuver={'type': 'roundabout', 'exit': 1})]
+    zone = route_zones.extract_zones(route, [s['geometry']['coordinates'] for s in route])[0]
+    self.assertEqual(zone['end'] - zone['start'], route_zones.MAX_ROUNDABOUT_M)
+
   def test_zones_ahead(self):
     route, geometry = make_route()
     zones = route_zones.extract_zones(route, geometry)
