@@ -4,7 +4,8 @@ navd extracts the zones from the route and, once a second, writes the ones ahead
 JSON file in /dev/shm. The longitudinal planner reads it. No cereal or params-key changes are needed.
 
 Mapbox: step i's `maneuver` happens where the step starts, and the step's `distance` runs to the next maneuver.
-A roundabout step therefore covers the entry up to the exit, which makes it a natural speed zone.
+With `roundabout_exits=true` (navd asks for it) a roundabout step covers the ring from entry to exit, a natural speed zone;
+its length is capped anyway, so that a route without it can never hold a long speed cap.
 """
 import json
 import os
@@ -21,6 +22,7 @@ ROUNDABOUT_TYPES = ("roundabout", "rotary", "roundabout turn")
 TURN_TYPES = ("turn", "end of road")
 EXIT_TYPES = ("off ramp", "fork")
 TURN_ZONE_M = 15.0  # length of the crossing at an intersection
+MAX_ROUNDABOUT_M = 100.0  # a ring is never longer; a longer step is a route that did not end it at the exit
 POINT_ZONE_M = 10.0  # length around a stop sign or traffic signal
 LOOKAHEAD_M = 1500.0
 PASSED_M = 20.0  # keep a zone this long after its end, so that the consumer sees it finish
@@ -44,7 +46,7 @@ def extract_zones(route, route_geometry) -> list[dict]:
     maneuver = step.get('maneuver', {})
     mtype, modifier = maneuver.get('type'), maneuver.get('modifier', '')
     if mtype in ROUNDABOUT_TYPES:
-      zones.append({'kind': 'roundabout', 'start': starts[i], 'end': starts[i] + step['distance'], 'exit': maneuver.get('exit')})
+      zones.append({'kind': 'roundabout', 'start': starts[i], 'end': starts[i] + min(step['distance'], MAX_ROUNDABOUT_M), 'exit': maneuver.get('exit')})
     elif mtype in TURN_TYPES and modifier != 'straight':
       zones.append({'kind': 'turn', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier})
     elif mtype in EXIT_TYPES:
