@@ -7,7 +7,8 @@ and with LaneTurnDesire enabled, so the navigation speed cap (see speed_cap.py) 
 Roundabouts (optional, off by default) follow the exit number: 1st exit = right, 2nd = straight (no desire), 3rd or later = left.
 
 Settings in /data/lightpilot/config.json (optional, no params keys):
-  {"nav_turn": {"enabled": true, "window_m": 25, "roundabout": false}}
+  {"nav_turn": {"enabled": true, "window_m": 25, "roundabout": false, "max_kph": 45}}
+max_kph: the route turn also works above the lane-turn speed, up to this (e.g. when the driver accelerates by hand).
 """
 import json
 import time
@@ -18,10 +19,14 @@ from openpilot.lightpilot.config import LIGHTPILOT_DIR
 from openpilot.lightpilot.route_zones import read_zones
 
 CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
+TRACE_FILE = LIGHTPILOT_DIR / "turn.log"
+TRACE_NEAR_M = 80.0  # log while a zone is this close ahead
+TRACE_MAX_BYTES = 200_000
 CONFIG_REFRESH_S = 5.0
 READ_INTERVAL_S = 0.2
-DEFAULTS = {'enabled': False, 'window_m': 25.0, 'roundabout': False}
+DEFAULTS = {'enabled': False, 'window_m': 25.0, 'roundabout': False, 'max_kph': 45.0}
 MIN_WINDOW_M, MAX_WINDOW_M = 5.0, 60.0
+MIN_MAX_KPH, MAX_MAX_KPH = 20.0, 60.0  # the route turn speed limit; the driver can be above the cap with the gas pedal
 AFTER_END_M = 5.0  # keep the desire this far past the end of the crossing, so that the turn is finished
 
 LEFT, RIGHT = 'left', 'right'
@@ -41,6 +46,7 @@ def load_config(path: Path | None = None) -> dict:
   except (OSError, ValueError, AttributeError):
     pass
   config['window_m'] = min(max(config['window_m'], MIN_WINDOW_M), MAX_WINDOW_M)
+  config['max_kph'] = min(max(config['max_kph'], MIN_MAX_KPH), MAX_MAX_KPH)
   return config
 
 
@@ -89,6 +95,42 @@ class NavTurn:
     self.config = dict(DEFAULTS)
     self.config_t = self.read_t = -1e9
     self.side: str | None = None
+    self.zones: list[dict] = []
+    self.zones_age = 0.0
+    self.trace_path = TRACE_FILE
+    self.trace_t = -1e9
+    self.trace_last: str | None = None
+
+  def trace(self, v_ego: float, threshold: float, reason: str, now: float | None = None) -> None:
+    """One line a second (and on every change) while a zone is near: what the route says and why a turn was or was not applied.
+    Read it with: tail -f /data/lightpilot/turn.log"""
+    now = time.monotonic() if now is None else now
+    try:
+      moved = v_ego * self.zones_age
+      near = [z for z in self.zones if z['start'] - moved <= TRACE_NEAR_M and z['end'] - moved >= -10.0]
+      if not near:
+        self.trace_last = None
+        return
+      z = near[0]
+      detail = z.get('exit') if z['kind'] == 'roundabout' else z.get('modifier')
+      line = (f"{time.strftime('%H:%M:%S')} v={v_ego * 3.6:.0f}km/h limit={threshold * 3.6:.0f}km/h zone={z['kind']}:{detail} "
+              f"start={z['start'] - moved:.0f}m end={z['end'] - moved:.0f}m route_says={self.side} result={reason}")
+      key = f"{z['kind']}{z['start']}{self.side}{reason}"
+      if key == self.trace_last and now - self.trace_t < 1.0:
+        return
+      self.trace_last, self.trace_t = key, now
+      path = Path(self.trace_path)
+      if path.exists() and path.stat().st_size > TRACE_MAX_BYTES:
+        path.write_text('')
+      with path.open('a') as f:
+        f.write(line + '\n')
+    except Exception:
+      pass  # a log must never get in the way
+
+  @property
+  def max_speed(self) -> float:
+    """Speed (m/s) up to which the route turn is applied."""
+    return self.config['max_kph'] / 3.6
 
   def update(self, v_ego: float, now: float | None = None) -> str | None:
     now = time.monotonic() if now is None else now
@@ -101,6 +143,7 @@ class NavTurn:
       if now - self.read_t >= READ_INTERVAL_S:
         self.read_t = now
         data = read_zones(self.zones_path, now)
+        self.zones, self.zones_age = ([], 0.0) if data is None else (data[0], data[1])
         self.side = None if data is None else turn_side(data[0], self.config, v_ego, data[1])
     except Exception:
       cloudlog.exception("lightpilot: nav turn failed")

@@ -109,11 +109,19 @@ class TestCap(unittest.TestCase):
 
   def test_file_age_is_compensated(self):
     config = dict(DEFAULTS)
-    zone = {'kind': 'turn', 'start': 20.0, 'end': 35.0}
+    zone = {'kind': 'turn', 'start': 80.0, 'end': 95.0}
     v_ego = 10.0
     fresh = compute_cap([zone], config, v_ego, 0.0)[0]
     aged = compute_cap([zone], config, v_ego, 1.0)[0]  # the car moved 10 m since: the zone is closer, the cap tighter
     self.assertLess(aged, fresh)
+
+  def test_roundabout_and_turn_reach_target_early_stop_does_not(self):
+    config = dict(DEFAULTS)
+    for kind, kph in (('roundabout', 30.0), ('turn', 30.0)):
+      cap = compute_cap([{'kind': kind, 'start': 40.0, 'end': 60.0}], config, 13.0, 0.0)[0]
+      self.assertAlmostEqual(cap, kph / 3.6, places=3)  # already at the target 40 m before the zone
+    stop = compute_cap([{'kind': 'stop', 'start': 40.0, 'end': 45.0}], config, 13.0, 0.0)[0]
+    self.assertGreater(stop, 25.0 / 3.6)  # stops keep the late 8 m offset
 
   def test_kinds_and_off_switches(self):
     config = {**DEFAULTS, 'signal_kph': 0.0}

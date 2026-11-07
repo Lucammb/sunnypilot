@@ -126,7 +126,14 @@ class TestController:
     assert self.run(self.controller(tmp_path), left=True) == TurnDirection.turnLeft
 
   def test_too_fast(self, tmp_path):
-    assert self.run(self.controller(tmp_path), v=LANE_CHANGE_SPEED_MIN + 1) == TurnDirection.none
+    assert self.run(self.controller(tmp_path), v=50 / 3.6) == TurnDirection.none  # above the 45 km/h route-turn limit
+
+  def test_route_turn_works_above_lane_turn_speed(self, tmp_path):
+    # the driver accelerates by hand past the 30 km/h cap: the roundabout/turn must still be made
+    assert self.run(self.controller(tmp_path), v=40 / 3.6) == TurnDirection.turnRight
+
+  def test_driver_blinker_keeps_the_lane_turn_speed(self, tmp_path):
+    assert self.run(self.controller(tmp_path), v=40 / 3.6, left=True) == TurnDirection.none
 
   def test_blindspot_blocks(self, tmp_path):
     assert self.run(self.controller(tmp_path), br=True) == TurnDirection.none
@@ -139,3 +146,40 @@ class TestController:
 
   def test_no_zones(self, tmp_path):
     assert self.run(self.controller(tmp_path, zones=[])) == TurnDirection.none
+
+
+class TestTrace:
+  def _turn(self, tmp_path):
+    from openpilot.lightpilot.nav_turn import NavTurn
+    t = NavTurn(config_path=tmp_path / 'c.json')
+    t.trace_path = tmp_path / 'turn.log'
+    return t
+
+  def test_logs_only_near_a_zone(self, tmp_path):
+    t = self._turn(tmp_path)
+    t.zones, t.zones_age = [{'kind': 'roundabout', 'start': 300.0, 'end': 360.0, 'exit': 1}], 0.0
+    t.trace(8.0, 8.5, 'none', now=0.0)
+    assert not (tmp_path / 'turn.log').exists()
+    t.zones = [{'kind': 'roundabout', 'start': 40.0, 'end': 100.0, 'exit': 1}]
+    t.side = 'right'
+    t.trace(10.0, 8.5, 'too fast', now=1.0)
+    line = (tmp_path / 'turn.log').read_text()
+    assert 'zone=roundabout:1' in line and 'route_says=right' in line and 'result=too fast' in line and 'v=36km/h' in line
+
+  def test_rate_limited_but_logs_changes(self, tmp_path):
+    t = self._turn(tmp_path)
+    t.zones, t.zones_age, t.side = [{'kind': 'turn', 'start': 10.0, 'end': 40.0, 'modifier': 'right'}], 0.0, 'right'
+    t.trace(5.0, 8.5, 'ok', now=0.0)
+    t.trace(5.0, 8.5, 'ok', now=0.3)
+    t.trace(5.0, 8.5, 'blind spot', now=0.4)
+    assert len((tmp_path / 'turn.log').read_text().splitlines()) == 2
+
+
+
+class TestMaxSpeed:
+  def test_default_and_clamp(self, tmp_path):
+    assert load_config(tmp_path / "missing.json")['max_kph'] == 45.0
+    for given, expected in ((200, 60.0), (5, 20.0), (35, 35.0)):
+      path = tmp_path / "c.json"
+      path.write_text(json.dumps({'nav_turn': {'max_kph': given}}))
+      assert load_config(path)['max_kph'] == expected

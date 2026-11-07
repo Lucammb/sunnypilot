@@ -6,7 +6,7 @@ sqrt(v_target^2 + 2 * decel * max(d - offset, 0)), so the car starts slowing exa
 through the zone and released a few meters after it.
 
 Settings live in /data/lightpilot/config.json (optional), so no params keys are involved:
-  {"nav_speed_cap": {"enabled": true, "roundabout_kph": 30, "turn_kph": 25, "stop_kph": 25, "signal_kph": 0, "decel": 0.45}}
+  {"nav_speed_cap": {"enabled": true, "roundabout_kph": 30, "turn_kph": 30, "stop_kph": 25, "signal_kph": 0, "decel": 0.45}}
 A speed of 0 turns that kind of zone off. Takes effect within a few seconds, no restart.
 """
 import json
@@ -21,9 +21,11 @@ from openpilot.lightpilot.route_zones import read_zones
 
 CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
 CONFIG_REFRESH_S = 5.0
-DEFAULTS = {'enabled': True, 'roundabout_kph': 30.0, 'turn_kph': 25.0, 'stop_kph': 25.0, 'signal_kph': 0.0, 'decel': 0.45}
+DEFAULTS = {'enabled': True, 'roundabout_kph': 30.0, 'turn_kph': 30.0, 'stop_kph': 25.0, 'signal_kph': 0.0, 'decel': 0.45}
 KIND_KEYS = {'roundabout': 'roundabout_kph', 'turn': 'turn_kph', 'stop': 'stop_kph', 'signal': 'signal_kph'}  # 'exit' never caps
-BRAKING_OFFSET_M = 8.0  # the target speed is reached this far before the zone
+BRAKING_OFFSET_M = 8.0  # the target speed is reached this far before the zone (stops)
+REACH_EARLY_M = 40.0  # roundabouts and turns: already at the target this far before, so the turn assist can act
+EARLY_KINDS = ('roundabout', 'turn')
 RELEASE_M = 5.0  # hold the cap this far past the end of the zone
 MIN_DECEL, MAX_DECEL = 0.2, 1.0  # a config typo must not make the car brake hard or not at all
 
@@ -45,9 +47,9 @@ def load_config(path: Path | None = None) -> dict:
   return config
 
 
-def allowed_speed(distance: float, target: float, decel: float) -> float:
-  """Highest speed (m/s) that still lets the car reach `target` at the zone with `decel` (m/s^2)."""
-  return math.sqrt(target * target + 2.0 * decel * max(distance - BRAKING_OFFSET_M, 0.0))
+def allowed_speed(distance: float, target: float, decel: float, offset: float = BRAKING_OFFSET_M) -> float:
+  """Highest speed (m/s) that still lets the car reach `target` `offset` m before the zone with `decel` (m/s^2)."""
+  return math.sqrt(target * target + 2.0 * decel * max(distance - offset, 0.0))
 
 
 def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tuple[float, str] | None:
@@ -61,7 +63,8 @@ def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tu
     start, end = zone['start'] - v_ego * age, zone['end'] - v_ego * age  # the file is up to a few seconds old
     if end < -RELEASE_M:
       continue
-    cap = allowed_speed(start, target, config['decel']) if start > 0.0 else target
+    offset = REACH_EARLY_M if zone['kind'] in EARLY_KINDS else BRAKING_OFFSET_M
+    cap = allowed_speed(start, target, config['decel'], offset) if start > 0.0 else target
     if best is None or cap < best[0]:
       best = (cap, zone['kind'])
   return best

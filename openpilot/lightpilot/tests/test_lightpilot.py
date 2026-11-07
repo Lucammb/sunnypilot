@@ -147,3 +147,20 @@ class TestMapSource(unittest.TestCase):
       self.assertTrue(use_comma_tiles(path))
       path.write_text('not json')
       self.assertFalse(use_comma_tiles(path))
+
+
+class TestHudLayout:
+  # sign: set-speed box 60..260, sign 284..484 (HudRendererSP); a digit is about 0.6 of the 176 px font wide
+  SIGN_RIGHT = 484
+
+  def test_full_width_is_centered(self):
+    from openpilot.lightpilot.hud_layout import speed_center_x
+    assert speed_center_x(0, 2160, 300) == 1080
+
+  def test_half_view_clears_the_sign_for_any_speed(self):
+    from openpilot.lightpilot.hud_layout import speed_center_x
+    for digits in (1, 2, 3):
+      width = digits * 0.6 * 176
+      center = speed_center_x(0, 1080, width)
+      assert center - width / 2 > self.SIGN_RIGHT + 20
+      assert center + width / 2 <= 1080 - 60 + 1

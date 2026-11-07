@@ -36,21 +36,32 @@ class LaneTurnController:
     self.param_read_counter += 1
 
   def update_lane_turn(self, blindspot_left: bool, blindspot_right: bool, left_blinker: bool, right_blinker: bool, v_ego: float) -> None:
+    # lightpilot: the route is read at any speed (so that turn.log can say why a turn was not applied); it only acts below the lane-turn speed
+    nav_side = self.nav_turn.update(v_ego) if self.enabled else None
+    nav_limit = max(self.lane_turn_value, self.nav_turn.max_speed)  # the route turn also works if the driver accelerates by hand
+    reason = 'off' if not self.enabled else ('none' if nav_side is None else 'ok')
     if left_blinker and not right_blinker and v_ego < self.lane_turn_value and not blindspot_left:
       self.turn_direction = TurnDirection.turnLeft
+      reason = 'driver blinker'
     elif right_blinker and not left_blinker and v_ego < self.lane_turn_value and not blindspot_right:
       self.turn_direction = TurnDirection.turnRight
-    elif not left_blinker and not right_blinker and v_ego < self.lane_turn_value:
+      reason = 'driver blinker'
+    elif not left_blinker and not right_blinker and v_ego < nav_limit:
       # lightpilot: no blinker, so the route decides (the driver's blinker always wins)
-      side = self.nav_turn.update(v_ego) if self.enabled else None
-      if side == LEFT and not blindspot_left:
+      if nav_side == LEFT and not blindspot_left:
         self.turn_direction = TurnDirection.turnLeft
-      elif side == RIGHT and not blindspot_right:
+      elif nav_side == RIGHT and not blindspot_right:
         self.turn_direction = TurnDirection.turnRight
       else:
         self.turn_direction = TurnDirection.none
+        if nav_side is not None:
+          reason = 'blind spot'
     else:
       self.turn_direction = TurnDirection.none
+      if nav_side is not None:
+        reason = 'too fast' if v_ego >= nav_limit else 'blinker'
+    if self.enabled:
+      self.nav_turn.trace(v_ego, nav_limit, reason)
 
   def get_turn_direction(self):
     if not self.enabled:
