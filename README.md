@@ -1,3 +1,28 @@
+# lightpilot
+
+**lightpilot** è un fork personale di [sunnypilot](https://github.com/sunnypilot/sunnypilot) (a sua volta fork di [openpilot di comma.ai](https://github.com/commaai/openpilot)) per una Tesla Model 3 HW3 con comma / Konik A1m. Non è affiliato a sunnypilot né a comma.ai. È software sperimentale: si usa **sempre supervisionati**, con le mani sul volante e gli occhi sulla strada.
+
+## Cosa aggiunge rispetto a sunnypilot
+
+- **Navigazione assistita**: destinazione e percorso (Mapbox) con mappa sempre visibile a metà schermo.
+- **Velocità prima di rotonde, svolte e stop**: il limite scende dolcemente a 30 km/h (25 per gli stop) prima della zona. Frena soltanto, non accelera mai; l'acceleratore del guidatore ha sempre la precedenza.
+- **Svolta dalla rotta**: in sperimentale, suggerisce la direzione della svolta o dell'uscita dalla rotonda come se fosse acceso l'indicatore. Il blinker del guidatore ha sempre la priorità. **Nessun cambio di corsia automatico, mai.**
+- **Destinazione dal telefono**: pagina web per impostare/annullare la destinazione senza SSH (`openpilot/lightpilot/phone`).
+- **Aggiornamenti controllati**: niente aggiornamenti automatici da comma; la Konik si aggiorna solo dal puntatore `STABLE` di questo repository, che viene spostato solo dopo i test.
+- **Diagnostica**: `/data/lightpilot/turn.log` registra cosa decide l'aiuto alla svolta.
+
+I dettagli e le impostazioni sono in [LIGHTPILOT.md](LIGHTPILOT.md). Il codice nostro sta in `openpilot/lightpilot/`.
+
+## Aggiornamento da sunnypilot
+
+Ogni lunedì un controllo automatico cerca nuove release stabili di sunnypilot, le integra, esegue i test e, solo se tutto passa e non tocca parti critiche di sicurezza, aggiorna `STABLE`.
+
+> **Avviso**: software sperimentale, senza alcuna garanzia, solo per ricerca. Chi lo usa è responsabile del rispetto delle leggi e dei regolamenti locali. Vedi la licenza sotto.
+
+---
+
+# sunnypilot (testo originale)
+
 ![](https://user-images.githubusercontent.com/47793918/233812617-beab2e71-57b9-479e-8bff-c3931347ca40.png)
 
 ## 🌞 What is sunnypilot?
