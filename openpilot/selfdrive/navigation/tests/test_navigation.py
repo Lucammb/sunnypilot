@@ -300,6 +300,18 @@ class TestRouteEngine(unittest.TestCase):
       set_banner(instruction, banners, distance)
       self.assertEqual((instruction.maneuverPrimaryText, instruction.maneuverSecondaryText, instruction.showFull), expected)
 
+  def test_banner_lanes(self):
+    lane = lambda directions, active, direction: {'type': 'lane', 'directions': directions, 'active': active, 'active_direction': direction}  # noqa: E731
+    banner = {'distanceAlongGeometry': 400, 'primary': {'text': 'Exit 6', 'type': 'off ramp', 'modifier': 'slight left'},
+              'sub': {'components': [lane(['slight left'], True, 'slight left'), lane(['straight'], False, None), {'type': 'text', 'text': 'x'}]}}
+    instruction = messaging.new_message('navInstruction').navInstruction
+    set_banner(instruction, [banner], 200)
+    lanes = [(list(ln.directions), ln.active, str(ln.activeDirection)) for ln in instruction.lanes]
+    self.assertEqual(lanes, [(['slightLeft'], True, 'slightLeft'), (['straight'], False, 'none')])
+    instruction = messaging.new_message('navInstruction').navInstruction
+    set_banner(instruction, [{'distanceAlongGeometry': 400, 'primary': {'text': 'Turn'}}], 200)
+    self.assertEqual(len(instruction.lanes), 0)
+
   def test_route_sent_on_change_and_periodically(self):
     sent = lambda: sum(call.args[0] == 'navRoute' for call in self.pm.send.call_args_list)  # noqa: E731
     self.sm.frame = 1

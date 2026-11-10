@@ -2,6 +2,8 @@
 
 Adapted from the mici panel (selfdrive/ui/mici/onroad/navigation.py) to take any width, so it can fill half the screen.
 """
+import datetime
+
 import numpy as np
 import pyray as rl
 
@@ -12,14 +14,20 @@ from openpilot.selfdrive.navigation.helpers import latest_gps_source
 from openpilot.selfdrive.navigation.renderer import EGO, ROUTE_INTENSITY, SIZE
 from openpilot.selfdrive.ui.onroad.cameraview import CONNECTION_RETRY_INTERVAL
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.system.ui.lib.application import FontWeight, TextAlignmentVertical
+from openpilot.system.ui.lib.application import FontWeight, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.label import UnifiedLabel, gui_label
 
 STALE_SECONDS = 3
 MARKER_MARGIN = 40  # source pixels kept below the ego so its marker stays visible
 HEADER_HEIGHT = 190
-FOOTER_HEIGHT = 80
+LANES_HEIGHT = 84  # extra header height when the map has lane guidance for the next maneuver
+FOOTER_HEIGHT = 96
+LANE_COLOR_ACTIVE = rl.Color(255, 255, 255, 255)
+LANE_COLOR_OTHER = rl.Color(120, 128, 134, 255)
+PILL_COLOR = rl.Color(20, 26, 30, 255)
+MINUTES_COLOR = rl.Color(72, 235, 132, 255)
+LANE_MODIFIERS = {'slightLeft': 'slight left', 'slightRight': 'slight right'}  # capnp lane direction -> Mapbox modifier
 
 # Dim the white roads and make the route's grey pop; only the route's exact level (and its neighbors) is recolored.
 MAP_COLORS = np.repeat(np.round(np.arange(256) * 0.45).astype(np.uint8)[:, None], 3, axis=1)
@@ -44,6 +52,16 @@ def arrow_shape(direction: str) -> list[tuple[float, float]]:
   return [(-flip * 9, 14), (-flip * 9, -4), (-flip * 2, -9), (flip * 9, -9), (flip * 3, -15), (flip * 9, -9), (flip * 3, -3)]
 
 
+def arrival_time(seconds: float) -> str:
+  """Clock time of the arrival, local time, 24 h."""
+  return (datetime.datetime.now() + datetime.timedelta(seconds=max(0, seconds))).strftime('%H:%M')
+
+
+def lane_arrow_key(direction: str) -> str:
+  """arrow_shape() key of a lane direction from navInstruction ('none' is drawn straight)."""
+  return LANE_MODIFIERS.get(direction, direction if direction != 'none' else 'straight')
+
+
 class NavigationPanel(Widget):
   """Turn instructions around the map frames mapsd publishes for the model."""
 
@@ -55,7 +73,6 @@ class NavigationPanel(Widget):
     self._texture = None
     self._primary = UnifiedLabel('', 40, FontWeight.BOLD, rl.WHITE, scroll=True)
     self._secondary = UnifiedLabel('', 32, FontWeight.MEDIUM, rl.Color(155, 230, 185, 255), scroll=True)
-    self._eta_label = UnifiedLabel('', 44, FontWeight.BOLD, rl.WHITE, scroll=True)
     self._accent = rl.Color(155, 230, 185, 255)
     self._muted = rl.Color(162, 175, 185, 255)
 
@@ -95,30 +112,60 @@ class NavigationPanel(Widget):
       gui_label(rl.Rectangle(rect.x + 24, rect.y + 24 + i * 56, rect.width - 48, 50), f'{name}: {"yes" if ok else "no"}', 40,
                 self._accent if ok else self._muted, FontWeight.MEDIUM, alignment_vertical=TextAlignmentVertical.TOP)
 
-  def _draw_arrow(self, x: float, y: float, direction: str, scale: float):
+  def _draw_arrow(self, x: float, y: float, direction: str, scale: float, color=None):
+    color = color or self._accent
     points = [rl.Vector2(x + scale * px, y + scale * py) for px, py in arrow_shape(direction)]
     for a, b in zip(points[:-1], points[1:], strict=True):
-      rl.draw_line_ex(a, b, scale * 5, self._accent)
+      rl.draw_line_ex(a, b, scale * 5, color)
     for point in points:
-      rl.draw_circle_v(point, scale * 2.5, self._accent)
+      rl.draw_circle_v(point, scale * 2.5, color)
+
+  def _draw_lanes(self, instruction, x: float, y: float, width: float):
+    """One arrow per lane, the lanes to take bright and the others grey, centered in the row at y."""
+    lanes = list(instruction.lanes)
+    step = min(110.0, (width - 40) / max(1, len(lanes)))
+    left = x + width / 2 - step * (len(lanes) - 1) / 2
+    for i, lane in enumerate(lanes):
+      directions = [str(d) for d in lane.directions]
+      shown = str(lane.activeDirection) if lane.active and str(lane.activeDirection) != 'none' else (directions[0] if directions else 'none')
+      self._draw_arrow(left + i * step, y, lane_arrow_key(shown), 2.2, LANE_COLOR_ACTIVE if lane.active else LANE_COLOR_OTHER)
+
+  def _draw_footer(self, instruction, rect):
+    """Pill with the arrival time, the minutes left (green) and the distance left."""
+    pill = rl.Rectangle(rect.x + 16, rect.y + rect.height - FOOTER_HEIGHT + 10, rect.width - 32, FOOTER_HEIGHT - 20)
+    rl.draw_rectangle_rounded(pill, 0.5, 12, PILL_COLOR)
+    minutes = max(1, round(max(0, instruction.timeRemaining) / 60))
+    cells = (
+      (arrival_time(instruction.timeRemaining), rl.WHITE),
+      (f'{minutes} min', MINUTES_COLOR),
+      (format_distance(max(0, instruction.distanceRemaining)), rl.WHITE),
+    )
+    cell_width = pill.width / len(cells)
+    for i, (text, color) in enumerate(cells):
+      gui_label(rl.Rectangle(pill.x + i * cell_width, pill.y, cell_width, pill.height), text, 44, color, FontWeight.BOLD,
+                alignment=TextAlignment.CENTER)
 
   def _render(self, rect):
     x, y = rect.x, rect.y
     rl.draw_rectangle_rec(rect, rl.Color(7, 13, 18, 255))
     instruction = ui_state.sm['navInstruction']
+    has_lanes = self.routing and len(instruction.lanes) > 0
+    header = HEADER_HEIGHT + (LANES_HEIGHT if has_lanes else 0)
     if self.routing:
-      self._draw_arrow(x + 90, y + HEADER_HEIGHT / 2, instruction.maneuverModifier, 3.4)
+      self._draw_arrow(x + 90, y + HEADER_HEIGHT / 2, instruction.maneuverModifier, 3.4, rl.WHITE)
       gui_label(rl.Rectangle(x + 180, y + 14, rect.width - 190, 80), format_distance(max(0, instruction.maneuverDistance)), 72, rl.WHITE,
                 FontWeight.BOLD, alignment_vertical=TextAlignmentVertical.TOP)
       self._primary.set_text(instruction.maneuverPrimaryText)
       self._primary.render(rl.Rectangle(x + 180, y + 98, rect.width - 196, 48))
       self._secondary.set_text(instruction.maneuverSecondaryText)
       self._secondary.render(rl.Rectangle(x + 180, y + 144, rect.width - 196, 40))
+      if has_lanes:
+        self._draw_lanes(instruction, x, y + HEADER_HEIGHT + LANES_HEIGHT / 2 - 8, rect.width)
     else:
       gui_label(rl.Rectangle(x + 24, y + 56, rect.width - 48, 70), 'Waiting for route', 56, rl.WHITE, FontWeight.BOLD,
                 alignment_vertical=TextAlignmentVertical.TOP)
 
-    map_rect = rl.Rectangle(x + 8, y + HEADER_HEIGHT, rect.width - 16, rect.height - HEADER_HEIGHT - FOOTER_HEIGHT)
+    map_rect = rl.Rectangle(x + 8, y + header, rect.width - 16, rect.height - header - FOOTER_HEIGHT)
     rl.draw_rectangle_rec(map_rect, rl.BLACK)
     if self.map_ready:
       # The model's frame magnified to fill the map area, with the ego near the bottom.
@@ -130,10 +177,7 @@ class NavigationPanel(Widget):
       self._draw_status(map_rect)
 
     if self.routing:
-      seconds = max(0, instruction.timeRemaining)
-      remaining = max(0, instruction.distanceRemaining)
-      self._eta_label.set_text(f'{max(1, round(seconds / 60))} min / {format_distance(remaining)}')
-      self._eta_label.render(rl.Rectangle(x + 20, y + rect.height - FOOTER_HEIGHT + 14, rect.width - 40, 56))
+      self._draw_footer(instruction, rect)
 
   def _unload_texture(self):
     if self._texture:

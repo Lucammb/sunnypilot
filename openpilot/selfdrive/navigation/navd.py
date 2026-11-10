@@ -31,6 +31,24 @@ def set_banner(instruction, banners, distance_to_maneuver):
   instruction.maneuverModifier = primary.get('modifier') or ''
   if banner.get('secondary') is not None:
     instruction.maneuverSecondaryText = banner['secondary']['text']
+  set_lanes(instruction, banner)
+
+
+LANE_DIRECTIONS = {'left': 'left', 'sharp left': 'left', 'uturn': 'left', 'right': 'right', 'sharp right': 'right',
+                   'straight': 'straight', 'slight left': 'slightLeft', 'slight right': 'slightRight'}
+
+
+def set_lanes(instruction, banner):
+  """Lane guidance (lightpilot): the lane components of the banner's sub part, when the map has them."""
+  components = [c for c in ((banner.get('sub') or {}).get('components') or []) if c.get('type') == 'lane']
+  lanes = instruction.init('lanes', len(components))
+  for lane, component in zip(lanes, components, strict=True):
+    directions = [LANE_DIRECTIONS.get(d, 'none') for d in component.get('directions') or []]
+    dirs = lane.init('directions', len(directions))
+    for i, direction in enumerate(directions):
+      dirs[i] = direction
+    lane.active = bool(component.get('active'))
+    lane.activeDirection = LANE_DIRECTIONS.get(component.get('active_direction') or '', 'none')
 
 
 class RouteEngine:
