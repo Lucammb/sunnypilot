@@ -15,6 +15,7 @@ SLOW="${LP_SLOW:-1800}"  # seconds between checks once online
 mkdir -p "$DIR"
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 cd "$WORK" || exit 0
+HOLD="$DIR/hold"  # while this file exists the code is left alone (to try a version by hand): touch /data/lightpilot/hold
 
 read_stable() {  # prints the sha of STABLE, fails if offline or garbage
   local sha
@@ -44,6 +45,7 @@ apply() {  # $1 = sha, present locally
 
 check_once() {  # online check; 0 = reached the server
   local sha current
+  [ -e "$HOLD" ] && return 0
   sha=$(read_stable "${1:-10}") || return 1
   current=$(git rev-parse HEAD 2>/dev/null)
   if [ "$sha" = "$current" ]; then rm -f "$PENDING"; return 0; fi
@@ -59,6 +61,7 @@ if [ "$1" = "--loop" ]; then
 fi
 
 # boot
+[ -e "$HOLD" ] && { log "hold file present, not updating"; exit 0; }
 pending=$(cat "$PENDING" 2>/dev/null | tr -d '[:space:]')
 if [[ "$pending" =~ ^[0-9a-f]{40}$ ]] && have "$pending"; then
   apply "$pending"
@@ -66,5 +69,8 @@ else
   rm -f "$PENDING"
   sha=$(read_stable 4) && { download "$sha" && apply "$sha"; } || log "offline at boot, will download while driving"
 fi
+# keep this script itself current: the copy in the repo replaces the one running from /data/lightpilot (used from the next boot)
+SELF="${LP_SELF:-/data/lightpilot/update.sh}"
+[ "$0" = "$SELF" ] && [ -f "$WORK/lightpilot_update.sh" ] && ! cmp -s "$WORK/lightpilot_update.sh" "$SELF" && cp "$WORK/lightpilot_update.sh" "$SELF.new" && chmod +x "$SELF.new" && mv "$SELF.new" "$SELF" && log "updater script refreshed"
 [ -n "$LP_NO_LOOP" ] || ( setsid nohup "$0" --loop >/dev/null 2>&1 & )
 exit 0

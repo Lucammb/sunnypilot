@@ -11,6 +11,7 @@ import pyray as rl
 
 from openpilot.cereal import custom
 from openpilot.common.constants import CV
+from openpilot.lightpilot.hud_layout import speed_limit_sign_origin
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode as SpeedLimitMode
@@ -183,8 +184,7 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
 
   def _render(self, rect: rl.Rectangle):
     width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
-    x = rect.x + 60 + width + 30 - 6
-    y = rect.y + 45 - 6
+    x, y = speed_limit_sign_origin(rect.x, rect.y, rect.width, width, UI_CONFIG.set_speed_height)  # lightpilot: under the set speed in the half view
 
     sign_rect = rl.Rectangle(x, y, width, UI_CONFIG.set_speed_height + 6 * 2)
 

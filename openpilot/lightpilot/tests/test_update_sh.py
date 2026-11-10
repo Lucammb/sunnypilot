@@ -91,3 +91,16 @@ def test_already_on_stable_does_nothing(tmp_path):
   assert rig.head() == rig.c1
   rig.loop_for(2)
   assert not (rig.dir / "pending_sha").exists()
+
+
+def test_hold_file_freezes_the_code(tmp_path):
+  rig = Rig(tmp_path)
+  rig.stable.write_text(rig.c2 + "\n")
+  rig.dir.mkdir(parents=True, exist_ok=True)
+  (rig.dir / "hold").write_text("")
+  rig.run()
+  assert rig.head() == rig.c1
+  assert "hold" in rig.log()
+  (rig.dir / "hold").unlink()
+  rig.run()
+  assert rig.head() == rig.c2

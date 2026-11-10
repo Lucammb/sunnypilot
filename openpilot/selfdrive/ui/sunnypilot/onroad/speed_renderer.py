@@ -38,7 +38,7 @@ class SpeedRenderer:
     # Draw current speed and unit
     speed_text = str(round(self.speed))
     speed_text_size = measure_text_cached(self._font_bold, speed_text, FONT_SIZES.current_speed)
-    center_x = speed_center_x(rect.x, rect.width, speed_text_size.x)  # lightpilot: clear of the speed-limit sign in the half view
+    center_x = speed_center_x(rect.x, rect.width, speed_text_size.x)
     speed_pos = rl.Vector2(center_x - speed_text_size.x / 2, 180 - speed_text_size.y / 2)
     rl.draw_text_ex(self._font_bold, speed_text, speed_pos, FONT_SIZES.current_speed, 0, COLORS.WHITE)
 

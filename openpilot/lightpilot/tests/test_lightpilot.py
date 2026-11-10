@@ -150,20 +150,19 @@ class TestMapSource(unittest.TestCase):
 
 
 class TestHudLayout:
-  # sign: set-speed box 60..260, sign 284..484 (HudRendererSP); a digit is about 0.6 of the 176 px font wide
-  SIGN_RIGHT = 484
-
-  def test_full_width_is_centered(self):
+  def test_speed_is_always_centered(self):
     from openpilot.lightpilot.hud_layout import speed_center_x
     assert speed_center_x(0, 2160, 300) == 1080
+    assert speed_center_x(0, 1080, 300) == 540
 
-  def test_half_view_clears_the_sign_for_any_speed(self):
-    from openpilot.lightpilot.hud_layout import speed_center_x
-    for digits in (1, 2, 3):
-      width = digits * 0.6 * 176
-      center = speed_center_x(0, 1080, width)
-      assert center - width / 2 > self.SIGN_RIGHT + 20
-      assert center + width / 2 <= 1080 - 60 + 1
+  def test_sign_beside_the_set_speed_when_full_width(self):
+    from openpilot.lightpilot.hud_layout import speed_limit_sign_origin
+    assert speed_limit_sign_origin(0, 0, 2160, 200, 204) == (284, 39)
+
+  def test_sign_under_the_set_speed_in_the_half_view(self):
+    from openpilot.lightpilot.hud_layout import speed_limit_sign_origin
+    x, y = speed_limit_sign_origin(0, 0, 1080, 200, 204)
+    assert x < 100 and y >= 45 + 204  # on the left, below the set-speed box
 
 
 class TestNavPerspective:
