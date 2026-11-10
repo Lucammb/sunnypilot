@@ -21,6 +21,10 @@ class ChevronOptions:
   ALL = 4
 
 
+# lightpilot: freccia del veicolo davanti piu' piccola (1.0 = originale)
+LEAD_CHEVRON_SCALE = 0.6
+
+
 class ChevronMetrics:
   def __init__(self):
     self._lead_status_alpha: float = 0.0
@@ -50,7 +54,7 @@ class ChevronMetrics:
 
     chevron_x = lead_vehicle.chevron[1][0]
     chevron_y = lead_vehicle.chevron[1][1]
-    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35
+    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35 * LEAD_CHEVRON_SCALE
 
     text_lines = self._build_text_lines(d_rel, v_rel, v_ego)
     if not text_lines:

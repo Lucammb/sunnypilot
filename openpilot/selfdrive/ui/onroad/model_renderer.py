@@ -11,6 +11,7 @@ from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
 from openpilot.system.ui.widgets import Widget
 
 from openpilot.selfdrive.ui.sunnypilot.onroad.model_renderer import ChevronMetrics, ModelRendererSP
+from openpilot.selfdrive.ui.sunnypilot.onroad.chevron_metrics import LEAD_CHEVRON_SCALE
 
 CLIP_MARGIN = 500
 MIN_DRAW_DISTANCE = 10.0
@@ -243,7 +244,7 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
       fill_alpha = min(fill_alpha, 255)
 
     # Calculate size and position
-    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35
+    sz = np.clip((25 * 30) / (d_rel / 3 + 30), 15.0, 30.0) * 2.35 * LEAD_CHEVRON_SCALE
     x = np.clip(point[0], 0.0, rect.width - sz / 2)
     y = min(point[1], rect.height - sz * 0.6)
 
@@ -294,8 +295,10 @@ class ModelRenderer(Widget, ChevronMetrics, ModelRendererSP):
       if not lead.glow or not lead.chevron:
         continue
 
-      rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
-      rl.draw_triangle_fan(lead.chevron, len(lead.chevron), rl.Color(201, 34, 49, lead.fill_alpha))
+      # lightpilot: tinta unita, senza bordo; giallo (lontano) -> rosso (vicino/si avvicina)
+      t = lead.fill_alpha / 255.0
+      color = rl.Color(int(218 + (201 - 218) * t), int(202 + (34 - 202) * t), int(37 + (49 - 37) * t), 255)
+      rl.draw_triangle_fan(lead.chevron, len(lead.chevron), color)
 
   @staticmethod
   def _get_path_length_idx(pos_x_array: np.ndarray, path_distance: float) -> int:
