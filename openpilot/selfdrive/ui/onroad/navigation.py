@@ -20,7 +20,8 @@ from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.label import UnifiedLabel, gui_label
 
 STALE_SECONDS = 3
-MAP_BACKGROUND = rl.Color(10, 13, 16, 255)
+BACKGROUND_RGB = (10, 13, 16)
+MAP_BACKGROUND = rl.Color(*BACKGROUND_RGB, 255)
 BANNER_TOP = rl.Color(8, 11, 14, 245)  # the banner fades into the map
 BANNER_BOTTOM = rl.Color(8, 11, 14, 150)
 HEADER_HEIGHT = 190
@@ -30,11 +31,17 @@ LANE_COLOR_ACTIVE = rl.Color(255, 255, 255, 255)
 LANE_COLOR_OTHER = rl.Color(120, 128, 134, 255)
 PILL_COLOR = rl.Color(14, 18, 22, 235)
 MINUTES_COLOR = rl.Color(72, 235, 132, 255)
+EGO_HALO = rl.Color(48, 104, 186, 230)
 LANE_MODIFIERS = {'slightLeft': 'slight left', 'slightRight': 'slight right'}  # capnp lane direction -> Mapbox modifier
 
-# Dim the white roads and make the route's grey pop; only the route's exact level (and its neighbors) is recolored.
-MAP_COLORS = np.repeat(np.round(np.arange(256) * 0.42).astype(np.uint8)[:, None], 3, axis=1)
-MAP_COLORS[ROUTE_INTENSITY - 1:ROUTE_INTENSITY + 2] = (72, 235, 132)
+# Frame gray level -> color. Black (nothing) becomes the map's own background, so the tilted view has no visible edge;
+# roads (white) become a light slate grey, their antialiased edges blend toward it; the route's exact level is green.
+ROAD_COLOR = (136, 144, 152)
+ROUTE_COLOR = (72, 235, 132)
+_BLEND = (np.arange(256) / 255.0)[:, None]
+MAP_COLORS = np.round(np.array(BACKGROUND_RGB) * (1 - _BLEND) + np.array(ROAD_COLOR) * _BLEND).astype(np.uint8)
+MAP_COLORS[ROUTE_INTENSITY - 1:ROUTE_INTENSITY + 2] = ROUTE_COLOR
+HORIZON_FADE = 0.45  # the far part of the map fades into the background, from the top of the panel down to this fraction
 
 
 def format_distance(meters: float) -> str:
@@ -149,15 +156,19 @@ class NavigationPanel(Widget):
                 alignment=TextAlignment.CENTER)
 
   def _draw_map(self, rect):
-    """The map frame as a tilted view filling the panel, other roads grey and the route green, with the ego's arrow."""
+    """The map frame as a tilted view filling the panel, other roads grey and the route green, fading out toward the
+    horizon, with the ego's arrow on a soft halo."""
     rl.draw_rectangle_rec(rect, MAP_BACKGROUND)
     strips = perspective_strips(int(rect.width), int(rect.height))
     for strip in strips:
       rl.draw_texture_pro(self._texture, rl.Rectangle(strip.sx, strip.sy, strip.sw, strip.sh),
                           rl.Rectangle(rect.x + strip.dx, rect.y + strip.dy, strip.dw, strip.dh), rl.Vector2(0, 0), 0, rl.WHITE)
+    clear = rl.Color(*BACKGROUND_RGB, 0)
+    rl.draw_rectangle_gradient_v(int(rect.x), int(rect.y), int(rect.width), int(rect.height * HORIZON_FADE), MAP_BACKGROUND, clear)
     ex, ey = ego_position(int(rect.width), int(rect.height))
     ex, ey = rect.x + ex, rect.y + ey
-    scale = PIXELS_PER_METER * 0.6
+    scale = PIXELS_PER_METER * 0.9
+    rl.draw_ellipse(int(ex), int(ey), scale * 9, scale * 7, EGO_HALO)
     tip, left, notch, right = (rl.Vector2(ex + scale * px, ey + scale * py * 0.75) for px, py in ((0, -9), (-7, 7), (0, 3), (7, 7)))
     rl.draw_triangle(tip, left, notch, rl.WHITE)
     rl.draw_triangle(tip, notch, right, rl.WHITE)

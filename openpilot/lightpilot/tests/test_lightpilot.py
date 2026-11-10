@@ -159,10 +159,14 @@ class TestHudLayout:
     from openpilot.lightpilot.hud_layout import speed_limit_sign_origin
     assert speed_limit_sign_origin(0, 0, 2160, 200, 204) == (284, 39)
 
-  def test_sign_under_the_set_speed_in_the_half_view(self):
-    from openpilot.lightpilot.hud_layout import speed_limit_sign_origin
+  def test_sign_small_and_top_right_in_the_half_view(self):
+    from openpilot.lightpilot.hud_layout import speed_limit_sign_origin, speed_limit_sign_scale
+    scale = speed_limit_sign_scale(1080)
+    assert scale < 1.0 and speed_limit_sign_scale(2160) == 1.0
     x, y = speed_limit_sign_origin(0, 0, 1080, 200, 204)
-    assert x < 100 and y >= 45 + 204  # on the left, below the set-speed box
+    assert y < 100  # at the top
+    assert x + 200 * scale > 1080 - 200  # on the right side
+    assert x + 200 * scale + 9 * scale <= 1080  # and inside the view
 
 
 class TestNavPerspective:

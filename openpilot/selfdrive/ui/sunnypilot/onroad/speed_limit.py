@@ -11,7 +11,7 @@ import pyray as rl
 
 from openpilot.cereal import custom
 from openpilot.common.constants import CV
-from openpilot.lightpilot.hud_layout import speed_limit_sign_origin
+from openpilot.lightpilot.hud_layout import speed_limit_sign_origin, speed_limit_sign_scale
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode as SpeedLimitMode
@@ -184,9 +184,10 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
 
   def _render(self, rect: rl.Rectangle):
     width = UI_CONFIG.set_speed_width_metric if ui_state.is_metric else UI_CONFIG.set_speed_width_imperial
-    x, y = speed_limit_sign_origin(rect.x, rect.y, rect.width, width, UI_CONFIG.set_speed_height)  # lightpilot: under the set speed in the half view
+    x, y = speed_limit_sign_origin(rect.x, rect.y, rect.width, width, UI_CONFIG.set_speed_height)  # lightpilot: smaller, top right in the half view
+    self._scale = speed_limit_sign_scale(rect.width)
 
-    sign_rect = rl.Rectangle(x, y, width, UI_CONFIG.set_speed_height + 6 * 2)
+    sign_rect = rl.Rectangle(x, y, width * self._scale, (UI_CONFIG.set_speed_height + 6 * 2) * self._scale)
 
     alpha = self._pre_active_fade.alpha
 
@@ -231,7 +232,8 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
 
   def _render_vienna(self, rect, val, sub, color, has_limit, alpha=1.0):
     center = rl.Vector2(rect.x + rect.width / 2, rect.y + rect.height / 2)
-    radius = (rect.width + 18) / 2
+    scale = getattr(self, "_scale", 1.0)
+    radius = (rect.width + 18 * scale) / 2
 
     white = rl.color_alpha(Colors.WHITE, alpha)
     red = rl.color_alpha(Colors.RED, alpha)
@@ -242,7 +244,7 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
     rl.draw_circle_v(center, radius, white)
     rl.draw_ring(center, radius * 0.75, radius, 0, 360, 36, red)
 
-    font_size = 70 if len(val) >= 3 else 85
+    font_size = int((70 if len(val) >= 3 else 85) * scale)
     self._draw_text_centered(self.font_bold, val, font_size, center, text_color)
 
     if sub and has_limit:
@@ -292,14 +294,15 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
     if not (valid and source_is_map):
       return
 
-    rect = rl.Rectangle(sign_rect.x + (sign_rect.width - 170) / 2, sign_rect.y + sign_rect.height + 10, 170, 160)
+    k = getattr(self, "_scale", 1.0)
+    rect = rl.Rectangle(sign_rect.x + (sign_rect.width - 170 * k) / 2, sign_rect.y + sign_rect.height + 10, 170 * k, 160 * k)
     rl.draw_rectangle_rounded(rect, 0.35, 10, Colors.SUB_BG)
     rl.draw_rectangle_rounded_lines_ex(rect, 0.35, 10, 3, Colors.MUTCD_LINES)
 
     mid_x = rect.x + rect.width / 2
-    self._draw_text_centered(self.font_demi, "AHEAD", 40, rl.Vector2(mid_x, rect.y + 28), Colors.GREY)
-    self._draw_text_centered(self.font_bold, str(round(self.speed_limit_ahead)), 70, rl.Vector2(mid_x, rect.y + 82), Colors.WHITE)
-    self._draw_text_centered(self.font_norm, self._format_dist(self.speed_limit_ahead_dist), 36, rl.Vector2(mid_x, rect.y + 134), Colors.GREY)
+    self._draw_text_centered(self.font_demi, "AHEAD", int(40 * k), rl.Vector2(mid_x, rect.y + 28 * k), Colors.GREY)
+    self._draw_text_centered(self.font_bold, str(round(self.speed_limit_ahead)), int(70 * k), rl.Vector2(mid_x, rect.y + 82 * k), Colors.WHITE)
+    self._draw_text_centered(self.font_norm, self._format_dist(self.speed_limit_ahead_dist), int(36 * k), rl.Vector2(mid_x, rect.y + 134 * k), Colors.GREY)
 
   @staticmethod
   def _format_dist(d):
