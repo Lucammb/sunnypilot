@@ -164,3 +164,20 @@ class TestHudLayout:
       center = speed_center_x(0, 1080, width)
       assert center - width / 2 > self.SIGN_RIGHT + 20
       assert center + width / 2 <= 1080 - 60 + 1
+
+
+class TestNavPerspective:
+  def test_strips_fit_the_frame_and_the_view(self):
+    from openpilot.lightpilot.nav_perspective import SIZE, perspective_strips
+    strips = perspective_strips(1064, 760)
+    assert len(strips) > 50
+    for s in strips:
+      assert 0 <= s.sx and s.sx + s.sw <= SIZE + 1e-6 and 0 <= s.sy and s.sy + s.sh <= SIZE + 1e-6
+      assert s.dx >= -1e-6 and s.dx + s.dw <= 1064 + 1e-6 and s.dy + s.dh <= 760
+
+  def test_farther_rows_show_more_of_the_map(self):
+    from openpilot.lightpilot.nav_perspective import perspective_strips
+    strips = perspective_strips(1064, 760)
+    assert strips[0].sy < strips[-1].sy  # top of the view is farther ahead
+    widths = [s.sw for s in strips]
+    assert widths[0] > widths[-1]

@@ -11,7 +11,8 @@ from msgq.visionipc import VisionIpcClient
 from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.common.constants import CV
 from openpilot.selfdrive.navigation.helpers import latest_gps_source
-from openpilot.selfdrive.navigation.renderer import EGO, ROUTE_INTENSITY, SIZE
+from openpilot.lightpilot.nav_perspective import PIXELS_PER_METER, ego_position, perspective_strips
+from openpilot.selfdrive.navigation.renderer import ROUTE_INTENSITY, SIZE
 from openpilot.selfdrive.ui.onroad.cameraview import CONNECTION_RETRY_INTERVAL
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import FontWeight, TextAlignment, TextAlignmentVertical
@@ -19,18 +20,20 @@ from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.label import UnifiedLabel, gui_label
 
 STALE_SECONDS = 3
-MARKER_MARGIN = 40  # source pixels kept below the ego so its marker stays visible
+MAP_BACKGROUND = rl.Color(10, 13, 16, 255)
+BANNER_TOP = rl.Color(8, 11, 14, 245)  # the banner fades into the map
+BANNER_BOTTOM = rl.Color(8, 11, 14, 150)
 HEADER_HEIGHT = 190
 LANES_HEIGHT = 84  # extra header height when the map has lane guidance for the next maneuver
 FOOTER_HEIGHT = 96
 LANE_COLOR_ACTIVE = rl.Color(255, 255, 255, 255)
 LANE_COLOR_OTHER = rl.Color(120, 128, 134, 255)
-PILL_COLOR = rl.Color(20, 26, 30, 255)
+PILL_COLOR = rl.Color(14, 18, 22, 235)
 MINUTES_COLOR = rl.Color(72, 235, 132, 255)
 LANE_MODIFIERS = {'slightLeft': 'slight left', 'slightRight': 'slight right'}  # capnp lane direction -> Mapbox modifier
 
 # Dim the white roads and make the route's grey pop; only the route's exact level (and its neighbors) is recolored.
-MAP_COLORS = np.repeat(np.round(np.arange(256) * 0.45).astype(np.uint8)[:, None], 3, axis=1)
+MAP_COLORS = np.repeat(np.round(np.arange(256) * 0.42).astype(np.uint8)[:, None], 3, axis=1)
 MAP_COLORS[ROUTE_INTENSITY - 1:ROUTE_INTENSITY + 2] = (72, 235, 132)
 
 
@@ -145,13 +148,35 @@ class NavigationPanel(Widget):
       gui_label(rl.Rectangle(pill.x + i * cell_width, pill.y, cell_width, pill.height), text, 44, color, FontWeight.BOLD,
                 alignment=TextAlignment.CENTER)
 
+  def _draw_map(self, rect):
+    """The map frame as a tilted view filling the panel, other roads grey and the route green, with the ego's arrow."""
+    rl.draw_rectangle_rec(rect, MAP_BACKGROUND)
+    strips = perspective_strips(int(rect.width), int(rect.height))
+    for strip in strips:
+      rl.draw_texture_pro(self._texture, rl.Rectangle(strip.sx, strip.sy, strip.sw, strip.sh),
+                          rl.Rectangle(rect.x + strip.dx, rect.y + strip.dy, strip.dw, strip.dh), rl.Vector2(0, 0), 0, rl.WHITE)
+    ex, ey = ego_position(int(rect.width), int(rect.height))
+    ex, ey = rect.x + ex, rect.y + ey
+    scale = PIXELS_PER_METER * 0.6
+    tip, left, notch, right = (rl.Vector2(ex + scale * px, ey + scale * py * 0.75) for px, py in ((0, -9), (-7, 7), (0, 3), (7, 7)))
+    rl.draw_triangle(tip, left, notch, rl.WHITE)
+    rl.draw_triangle(tip, notch, right, rl.WHITE)
+
   def _render(self, rect):
     x, y = rect.x, rect.y
-    rl.draw_rectangle_rec(rect, rl.Color(7, 13, 18, 255))
     instruction = ui_state.sm['navInstruction']
     has_lanes = self.routing and len(instruction.lanes) > 0
     header = HEADER_HEIGHT + (LANES_HEIGHT if has_lanes else 0)
+
+    # The map fills the panel; the banner and the footer float over it.
+    if self.map_ready:
+      self._draw_map(rect)
+    else:
+      rl.draw_rectangle_rec(rect, MAP_BACKGROUND)
+      self._draw_status(rl.Rectangle(x, y + header, rect.width, rect.height - header))
+
     if self.routing:
+      rl.draw_rectangle_gradient_v(int(x), int(y), int(rect.width), int(header), BANNER_TOP, BANNER_BOTTOM)
       self._draw_arrow(x + 90, y + HEADER_HEIGHT / 2, instruction.maneuverModifier, 3.4, rl.WHITE)
       gui_label(rl.Rectangle(x + 180, y + 14, rect.width - 190, 80), format_distance(max(0, instruction.maneuverDistance)), 72, rl.WHITE,
                 FontWeight.BOLD, alignment_vertical=TextAlignmentVertical.TOP)
@@ -161,23 +186,10 @@ class NavigationPanel(Widget):
       self._secondary.render(rl.Rectangle(x + 180, y + 144, rect.width - 196, 40))
       if has_lanes:
         self._draw_lanes(instruction, x, y + HEADER_HEIGHT + LANES_HEIGHT / 2 - 8, rect.width)
+      self._draw_footer(instruction, rect)
     else:
       gui_label(rl.Rectangle(x + 24, y + 56, rect.width - 48, 70), 'Waiting for route', 56, rl.WHITE, FontWeight.BOLD,
                 alignment_vertical=TextAlignmentVertical.TOP)
-
-    map_rect = rl.Rectangle(x + 8, y + header, rect.width - 16, rect.height - header - FOOTER_HEIGHT)
-    rl.draw_rectangle_rec(map_rect, rl.BLACK)
-    if self.map_ready:
-      # The model's frame magnified to fill the map area, with the ego near the bottom.
-      scale = max(map_rect.width, map_rect.height) / SIZE
-      width, height = min(SIZE, map_rect.width / scale), min(SIZE, map_rect.height / scale)
-      source = rl.Rectangle((SIZE - width) / 2, min(SIZE - height, max(0, EGO[1] + MARKER_MARGIN - height)), width, height)
-      rl.draw_texture_pro(self._texture, source, map_rect, rl.Vector2(0, 0), 0, rl.WHITE)
-    else:
-      self._draw_status(map_rect)
-
-    if self.routing:
-      self._draw_footer(instruction, rect)
 
   def _unload_texture(self):
     if self._texture:
