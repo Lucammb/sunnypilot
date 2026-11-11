@@ -31,3 +31,28 @@ def speed_limit_sign_origin(rect_x: float, rect_y: float, rect_width: float, box
   if is_compact(rect_width):
     return rect_x + rect_width - RIGHT_MARGIN_PX - 9 * scale - box_width * scale, rect_y + 45 - 6
   return rect_x + LEFT_MARGIN_PX + box_width + 30 - 6, rect_y + 45 - 6
+
+
+# Next-maneuver card of the navigation overlay (top right) and the drive-mode button, which sits in that corner when
+# there is no route and, smaller, under the card when there is one.
+NAV_CARD_WIDTH = 520
+NAV_CARD_HEIGHT = 150
+NAV_CARD_MARGIN = 28
+DRIVE_MODE_BUTTON_PX = 150
+DRIVE_MODE_BADGE_PX = 116
+DRIVE_MODE_TOUCH_SLOP_PX = 24  # a finger is not a mouse
+
+
+def drive_mode_button(rect_x: float, rect_y: float, rect_width: float, navigation: bool) -> tuple[float, float, float]:
+  """(x, y, size) of the square around the round drive-mode button."""
+  if navigation:
+    size = DRIVE_MODE_BADGE_PX
+    return rect_x + rect_width - NAV_CARD_MARGIN - size, rect_y + NAV_CARD_MARGIN + NAV_CARD_HEIGHT + 16, size
+  size = DRIVE_MODE_BUTTON_PX
+  return rect_x + rect_width - RIGHT_MARGIN_PX - size, rect_y + 45, size
+
+
+def in_drive_mode_button(px: float, py: float, button: tuple[float, float, float]) -> bool:
+  x, y, size = button
+  radius = size / 2 + DRIVE_MODE_TOUCH_SLOP_PX
+  return (px - (x + size / 2)) ** 2 + (py - (y + size / 2)) ** 2 <= radius * radius

@@ -6,6 +6,7 @@ import datetime
 import pyray as rl
 
 from openpilot.common.constants import CV
+from openpilot.lightpilot.hud_layout import NAV_CARD_HEIGHT, NAV_CARD_MARGIN, NAV_CARD_WIDTH
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import FontWeight, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets import Widget
@@ -14,9 +15,9 @@ from openpilot.system.ui.widgets.label import UnifiedLabel, gui_label
 CARD_COLOR = rl.Color(14, 18, 22, 215)
 PILL_COLOR = rl.Color(14, 18, 22, 215)
 MINUTES_COLOR = rl.Color(72, 235, 132, 255)
-CARD_WIDTH = 520
-CARD_HEIGHT = 150
-CARD_MARGIN = 28
+CARD_WIDTH = NAV_CARD_WIDTH
+CARD_HEIGHT = NAV_CARD_HEIGHT
+CARD_MARGIN = NAV_CARD_MARGIN
 PILL_WIDTH = 760
 PILL_HEIGHT = 84
 PILL_BOTTOM_MARGIN = 30

@@ -29,6 +29,13 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   lato dal percorso. La tua freccia ha sempre la precedenza; l'angolo cieco la blocca. Rotonde (opzionali): 1ª uscita =
   destra, 2ª = dritto, 3ª o oltre = sinistra. Si accende in `/data/lightpilot/config.json`:
   `{"nav_turn": {"enabled": true, "window_m": 25, "roundabout": false}}` (vale entro pochi secondi, senza riavvio).
+- **Stock / sperimentale** (`drive_mode.py`): il software di base fa sempre partecipare il piano di velocità del modello
+  (semafori, stop). Qui torna una scelta. Senza percorso: tocco sul pulsante in alto a destra (`STOCK` / `EXP`), scelta
+  salvata in `/data/lightpilot/drive_mode`. Con un percorso: automatico (`AUTO`), sperimentale quando una rotonda, una
+  svolta, uno stop o un semaforo del percorso è entro `max(150 m, 12 s)` e fino a 15 m dopo; altrove stock. Non lascia
+  mai lo sperimentale da solo sotto 8 m/s mentre è il modello a frenare (auto ferma al rosso). Un semaforo che Mapbox
+  non conosce NON viene gestito in automatico. Opzioni in `config.json`:
+  `{"drive_mode": {"auto_in_navigation": true, "ahead_s": 12, "min_ahead_m": 150}}`.
 
 ### Prossime fasi
 2. Avviso corsia per uscite/bivi; poi deceleriamo verso l'uscita dopo un cambio corsia manuale.

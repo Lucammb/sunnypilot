@@ -5,6 +5,7 @@ from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.selfdrive.ui import UI_BORDER_SIZE
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.onroad.alert_renderer import AlertRenderer
+from openpilot.selfdrive.ui.onroad.drive_mode_button import DriveModeButton
 from openpilot.selfdrive.ui.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
@@ -58,6 +59,7 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
     self._navigation = NavigationPanel()  # lightpilot
+    self._drive_mode_button = DriveModeButton()  # lightpilot: stock / experimental
 
   def _render(self, rect):
     # Only render when system is started to avoid invalid data access
@@ -98,6 +100,8 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
     self._hud_renderer.render(self._content_rect)
     self.alert_renderer.render(self._content_rect)
     self.driver_state_renderer.render(self._content_rect)
+    self._drive_mode_button.set_navigation(show_navigation)
+    self._drive_mode_button.render(self._content_rect)
 
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
@@ -114,7 +118,9 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
   def close(self):
     super().close()
 
-  def _handle_mouse_press(self, _):
+  def _handle_mouse_press(self, mouse_pos):
+    if ui_state.started and self._drive_mode_button.press(mouse_pos):  # lightpilot: a tap on the button is not for the sidebar
+      return
     if self._click_callback is not None:
       self._click_callback()
 
