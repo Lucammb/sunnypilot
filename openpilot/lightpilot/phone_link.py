@@ -172,7 +172,10 @@ def main() -> None:  # pragma: no cover - needs the device
       nav = sm['navInstruction']
       return {'remaining_m': float(nav.distanceRemaining), 'remaining_s': float(nav.timeRemaining),
               'next_m': float(nav.maneuverDistance), 'text': nav.maneuverPrimaryText,
-              'modifier': nav.maneuverModifier, 'street': nav.maneuverSecondaryText}
+              'modifier': nav.maneuverModifier, 'street': nav.maneuverSecondaryText,
+              'limit_kmh': round(float(nav.speedLimit) * 3.6) if nav.speedLimit > 0 else None,
+              'lanes': [{'d': [str(d) for d in lane.directions], 'a': bool(lane.active), 'ad': str(lane.activeDirection)}
+                        for lane in nav.lanes]}
     return {'remaining_m': None}
 
   def live() -> dict:

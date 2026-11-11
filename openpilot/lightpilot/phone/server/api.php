@@ -2,7 +2,9 @@
 // lightpilot phone link: keeps ONE destination and the device's progress. No database, one JSON file.
 // phone  (X-Token = phone_token):  GET ?a=state   POST ?a=set {lat,lon,name}   POST ?a=clear
 // phone also:  GET ?a=route -> {key, pts} (the route geometry, fetched when route_key changes)
+//              GET ?a=cfg   -> {mapbox} (public pk. token for the map, kept here and not in the page)
 // device (X-Token = device_token): POST ?a=sync {seq,has_dest,arrived,remaining_m,remaining_s,next_m,text,modifier,street,
+//                                                  limit_kmh,lanes[{d:[dir..],a,ad}],
 //                                                  pos{lat,lon,bearing,speed},route_key,route_pts[[lat,lon]..]} -> {seq,dest}
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
@@ -42,6 +44,17 @@ $dirty = false;
 $action = $_GET['a'] ?? '';
 
 function num(mixed $v): ?float { return (is_int($v) || is_float($v)) && is_finite((float)$v) ? (float)$v : null; }
+function lanes(mixed $v): array {
+  $ok = ['none', 'left', 'right', 'straight', 'slightLeft', 'slightRight'];
+  $out = [];
+  foreach (is_array($v) ? array_slice($v, 0, 8) : [] as $l) {
+    if (!is_array($l)) { continue; }
+    $d = array_values(array_filter(array_slice(is_array($l['d'] ?? null) ? $l['d'] : [], 0, 4), fn($x) => in_array($x, $ok, true)));
+    $ad = in_array($l['ad'] ?? '', $ok, true) ? $l['ad'] : 'none';
+    $out[] = ['d' => $d, 'a' => !empty($l['a']), 'ad' => $ad];
+  }
+  return $out;
+}
 
 if ($role === 'phone' && $action === 'set') {
   $lat = num($body['lat'] ?? null); $lon = num($body['lon'] ?? null);
@@ -57,7 +70,8 @@ if ($role === 'phone' && $action === 'set') {
   if (num($body['remaining_m'] ?? null) !== null) {
     $route = ['remaining_m' => num($body['remaining_m']), 'remaining_s' => num($body['remaining_s'] ?? null),
               'next_m' => num($body['next_m'] ?? null), 'text' => mb_substr((string)($body['text'] ?? ''), 0, 120),
-              'modifier' => mb_substr((string)($body['modifier'] ?? ''), 0, 24), 'street' => mb_substr((string)($body['street'] ?? ''), 0, 120), 'at' => $now];
+              'modifier' => mb_substr((string)($body['modifier'] ?? ''), 0, 24), 'street' => mb_substr((string)($body['street'] ?? ''), 0, 120),
+              'limit_kmh' => num($body['limit_kmh'] ?? null), 'lanes' => lanes($body['lanes'] ?? null), 'at' => $now];
   }
   $state['device']['route'] = $route;
   $pos = $body['pos'] ?? null;
@@ -83,6 +97,10 @@ if ($role === 'phone' && $action === 'set') {
   $r = is_file($routeFile) ? json_decode((string)file_get_contents($routeFile), true) : null;
   flock($fh, LOCK_UN); fclose($fh);
   respond(200, is_array($r) ? $r : ['key' => '', 'pts' => []]);
+} elseif ($role === 'phone' && $action === 'cfg') {
+  flock($fh, LOCK_UN); fclose($fh);
+  $tok = (string)($cfg['mapbox_token'] ?? '');
+  respond(200, ['mapbox' => str_starts_with($tok, 'pk.') ? $tok : '']); // only a public token ever leaves this file
 } elseif (!($role === 'phone' && $action === 'state')) {
   respond(400, ['error' => 'bad request']);
 }

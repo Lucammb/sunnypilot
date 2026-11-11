@@ -3,5 +3,6 @@
 return [
   'phone_token'  => 'CHANGE_ME_phone',   // used by the phone app
   'device_token' => 'CHANGE_ME_device',  // used by the Konik
+  'mapbox_token' => '',                  // optional: PUBLIC Mapbox token (pk.…), URL-restricted to this site; without it the page uses the plain map
   'ttl_hours'    => 12,                  // a destination older than this is not armed again after a boot
 ];

@@ -26,16 +26,24 @@ ul{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px}li button{widt
 li small{display:block;color:var(--mute);font-weight:400}
 .hide{display:none!important}.actions{display:flex;gap:10px;margin-top:12px}.actions button{flex:1}
 
-#nav{position:fixed;inset:0;z-index:10;background:#0d1115;color:#fff}#map{position:absolute;inset:0}
-#banner{position:absolute;left:10px;right:10px;top:max(10px,env(safe-area-inset-top));display:flex;gap:14px;align-items:center;padding:12px 16px;border-radius:18px;background:rgba(14,18,22,.88);backdrop-filter:blur(8px)}
-#banner svg{width:56px;height:56px;flex:none}#bdist{font-size:34px;font-weight:700;line-height:1}#bstreet{font-size:17px;color:#b9c4cb;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the map is always the Mapbox day navigation look, whatever the phone theme is */
+#nav{position:fixed;inset:0;z-index:10;background:#e9ebee;color:#0d1a22}#map{position:absolute;inset:0}
+.glass{background:rgba(255,255,255,.97);box-shadow:0 4px 20px rgba(13,26,34,.28)}
+#top{position:absolute;left:10px;right:10px;top:max(10px,env(safe-area-inset-top));display:grid;gap:8px}
+#banner{display:flex;gap:14px;align-items:center;padding:12px 16px;border-radius:18px}
+#banner svg{width:56px;height:56px;flex:none}#bdist{font-size:34px;font-weight:700;line-height:1}#bstreet{font-size:17px;color:#4d5f6b;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #bwrap{min-width:0}
-#me{position:absolute;left:50%;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none;filter:drop-shadow(0 3px 6px rgba(0,0,0,.6))}
-#pill{position:absolute;left:10px;right:10px;bottom:max(14px,env(safe-area-inset-bottom));display:flex;justify-content:space-around;align-items:center;padding:14px 8px;border-radius:999px;background:rgba(14,18,22,.9);font-size:22px;font-weight:700}
-#pmin{color:#48eb84}
-#menu{position:absolute;right:12px;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 76px);width:48px;height:48px;border-radius:50%;padding:0;font-size:22px;background:rgba(14,18,22,.9);color:#fff;border:1px solid #2a3640}
-#navmsg{position:absolute;left:0;right:0;top:50%;text-align:center;font-size:18px;color:#b9c4cb;padding:0 24px}
-.maplibregl-ctrl-bottom-left,.maplibregl-ctrl-bottom-right{bottom:84px}
+#lanes{display:flex;gap:4px;justify-content:center;padding:6px 10px;border-radius:14px;width:max-content;max-width:100%;margin:0 auto}
+#lanes svg{width:30px;height:30px}
+#me{position:absolute;left:50%;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35))}
+#pill{position:absolute;left:10px;right:10px;bottom:max(14px,env(safe-area-inset-bottom));display:flex;justify-content:space-around;align-items:center;padding:14px 8px;border-radius:999px;font-size:22px;font-weight:700}
+#pmin{color:#0f9d4b}
+#menu{position:absolute;right:12px;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 76px);width:48px;height:48px;border-radius:50%;padding:0;font-size:22px;color:#0d1a22;border:0}
+#gauges{position:absolute;left:12px;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 76px);display:grid;gap:8px;justify-items:center}
+#limit{width:64px;height:64px;border-radius:50%;background:#fff;border:7px solid #d8232a;display:flex;align-items:center;justify-content:center;font-size:25px;font-weight:800;color:#111;box-shadow:0 3px 12px rgba(13,26,34,.35)}
+#spd{min-width:64px;padding:6px 10px;border-radius:12px;text-align:center;font-size:24px;font-weight:800;line-height:1.1}#spd small{display:block;font-size:11px;font-weight:600;color:#4d5f6b}#spd.over{color:#d8232a}
+#navmsg{position:absolute;left:0;right:0;top:50%;text-align:center;font-size:18px;color:#4d5f6b;padding:0 24px}
+#map .mapboxgl-ctrl-bottom-left,#map .mapboxgl-ctrl-bottom-right{bottom:84px}
 </style>
 </head>
 <body>
@@ -70,12 +78,16 @@ li small{display:block;color:var(--mute);font-weight:400}
 
 <div id="nav" class="hide">
   <div id="map"></div>
-  <div id="banner"><svg id="barrow" viewBox="-20 -20 40 40" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></svg>
-    <div id="bwrap"><div id="bdist">—</div><div id="bstreet"></div></div></div>
-  <svg id="me" viewBox="-23 -23 46 46"><circle r="22" fill="rgba(48,104,186,.55)"/><path d="M0-14 L10 12 L0 6 L-10 12Z" fill="#fff"/></svg>
+  <div id="top">
+    <div id="banner" class="glass"><svg id="barrow" viewBox="-20 -20 40 40" fill="none" stroke="#0d1a22" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></svg>
+      <div id="bwrap"><div id="bdist">—</div><div id="bstreet"></div></div></div>
+    <div id="lanes" class="glass hide"></div>
+  </div>
+  <svg id="me" viewBox="-23 -23 46 46"><circle r="22" fill="rgba(47,125,246,.28)"/><path d="M0-15 L11 13 L0 7 L-11 13Z" fill="#2f7df6" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg>
   <div id="navmsg"></div>
-  <button id="menu" aria-label="Menu">☰</button>
-  <div id="pill"><span id="parr">--:--</span><span id="pmin">-- min</span><span id="pkm">-- km</span></div>
+  <div id="gauges"><div id="limit" class="hide"></div><div id="spd" class="glass hide"><span id="spdv">0</span><small>km/h</small></div></div>
+  <button id="menu" class="glass" aria-label="Menu">☰</button>
+  <div id="pill" class="glass"><span id="parr">--:--</span><span id="pmin">-- min</span><span id="pkm">-- km</span></div>
 </div>
 <script>
 const API = 'api.php';
@@ -156,62 +168,45 @@ $('go').onclick = async () => { if (!picked) return; $('go').disabled = true;
 $('cancel').onclick = async () => { if (confirm('Annullare la destinazione?')) { await call('clear', {}).catch(() => {}); poll(); } };
 
 
-// ---- live navigation map (MapLibre, OpenFreeMap tiles, dark grey style made here) ----
-const ML_JS = 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js';
-const ML_CSS = 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css';
-const ML_JS_SRI = 'sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj';
-const ML_CSS_SRI = 'sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V';
-const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
-const LIVE_MS = 1500, PITCH = 62, PAD_TOP_FRAC = 0.34;
+// ---- live navigation map (Mapbox GL JS, standard day navigation style; the public pk. token comes from the server) ----
+const MB_VER = '3.33.0';
+const MB_JS = 'https://cdn.jsdelivr.net/npm/mapbox-gl@' + MB_VER + '/dist/mapbox-gl.js';
+const MB_CSS = 'https://cdn.jsdelivr.net/npm/mapbox-gl@' + MB_VER + '/dist/mapbox-gl.css';
+const MB_JS_SRI = 'sha384-jdGuG3GDIph+ONsjITkxWmlUE2RR0At6jtOVirn6L/6dYy3WcAVDaBNI3X96rUT0';
+const MB_CSS_SRI = 'sha384-S0a+eT2dLtsB1suB6ZJ/8IX+0d0Fvix9weJQ67L3E+jHOvn6SUKwYXVDyGdMuJtL';
+const STYLE_URL = 'mapbox://styles/mapbox/navigation-day-v1';
+const LIVE_MS = 1500, PITCH = 62, PAD_TOP_FRAC = 0.36;
 let map = null, mapLoading = null, navOpen = false, dismissed = false, routePts = [], routeKey = '', routeFetching = false, lastBearing = 0, wake = null;
 
 function loadLib() {
-  if (window.maplibregl) return Promise.resolve();
+  if (window.mapboxgl) return Promise.resolve();
   return new Promise((ok, fail) => {
-    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = ML_CSS; l.integrity = ML_CSS_SRI; l.crossOrigin = 'anonymous'; document.head.appendChild(l);
-    const sc = document.createElement('script'); sc.src = ML_JS; sc.integrity = ML_JS_SRI; sc.crossOrigin = 'anonymous'; sc.onload = ok; sc.onerror = fail; document.head.appendChild(sc);
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = MB_CSS; l.integrity = MB_CSS_SRI; l.crossOrigin = 'anonymous'; document.head.appendChild(l);
+    const sc = document.createElement('script'); sc.src = MB_JS; sc.integrity = MB_JS_SRI; sc.crossOrigin = 'anonymous'; sc.onload = ok; sc.onerror = fail; document.head.appendChild(sc);
   });
-}
-function darken(st) {
-  const C = { bg: '#0d1115', land: '#11171c', water: '#0a131a', park: '#0f1a16', road: '#8a949c', minor: '#5f6970', path: '#3b434a', text: '#aeb8bf' };
-  let firstSymbol = null;
-  st.layers.forEach(l => {
-    l.paint = l.paint || {}; l.layout = l.layout || {};
-    const id = l.id, t = l.type;
-    if (t === 'background') { l.paint['background-color'] = C.bg; }
-    else if (t === 'fill') {
-      delete l.paint['fill-pattern']; delete l.paint['fill-outline-color'];
-      if (/building/.test(id)) l.layout.visibility = 'none';
-      l.paint['fill-color'] = /water/.test(id) ? C.water : /park|wood|forest|grass|green|landcover|nature/.test(id) ? C.park : C.land;
-    } else if (t === 'line') {
-      if (/rail|transit|aerialway|ferry|boundary|admin|cable|ski/.test(id)) l.layout.visibility = 'none';
-      else if (/waterway|river|stream/.test(id)) l.paint['line-color'] = C.water;
-      else if (/casing/.test(id)) l.paint['line-color'] = C.bg;
-      else l.paint['line-color'] = /motorway|trunk|primary|major/.test(id) ? C.road : /path|pedestrian|track|foot|cycle|steps/.test(id) ? C.path : C.minor;
-    } else if (t === 'symbol') {
-      if (/poi|housenumber|airport|aeroway|peak|transport|rail|ferry|aerialway|shield/.test(id)) l.layout.visibility = 'none';
-      else { l.paint['text-color'] = C.text; l.paint['text-halo-color'] = C.bg; l.paint['text-halo-width'] = 1.6; }
-      if (!firstSymbol && l.layout.visibility !== 'none') firstSymbol = id;
-    } else if (t !== 'raster') { l.layout.visibility = 'none'; }
-  });
-  const src = Object.keys(st.sources).find(k => st.sources[k].type === 'vector');
-  const layer = { id: 'lp-buildings', type: 'fill-extrusion', source: src, 'source-layer': 'building', minzoom: 15,
-    paint: { 'fill-extrusion-color': '#1d252c', 'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 6], 'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': 0.9 } };
-  if (src) { const i = firstSymbol ? st.layers.findIndex(l => l.id === firstSymbol) : st.layers.length; st.layers.splice(i, 0, layer); }
-  return { st, before: firstSymbol };
 }
 async function ensureMap() {
   if (map) return map;
   if (mapLoading) return mapLoading;
   mapLoading = (async () => {
+    const tok = (await call('cfg')).mapbox;
+    if (!tok) throw new Error('notoken');
     await loadLib();
-    const { st, before } = darken(await (await fetch(STYLE_URL)).json());
-    const m = new maplibregl.Map({ container: 'map', style: st, center: [9.19, 45.46], zoom: 16, pitch: PITCH, attributionControl: { compact: true }, interactive: false, fadeDuration: 0 });
-    await new Promise(ok => m.on('load', ok));
+    mapboxgl.accessToken = tok;
+    const m = new mapboxgl.Map({ container: 'map', style: STYLE_URL, center: [9.19, 45.46], zoom: 16, pitch: PITCH, attributionControl: true, interactive: false, fadeDuration: 0 });
+    await new Promise((ok, fail) => { m.on('load', ok); m.on('error', e => { if (!m.loaded() && e && e.error && /401|403|token|style/i.test(String(e.error.message || e.error.status))) fail(e.error); }); });
+    const layers = m.getStyle().layers;
+    const before = (layers.find(l => l.type === 'symbol') || {}).id;
     m.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
     const w = (a, b) => ['interpolate', ['exponential', 2], ['zoom'], 12, a, 20, b];
-    m.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#06210f', 'line-width': w(5, 120) } }, before || undefined);
-    m.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#48eb84', 'line-width': w(3, 80) } }, before || undefined);
+    m.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': w(6, 140) } }, before);
+    m.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2f7df6', 'line-width': w(4, 100) } }, before);
+    try { // 3D buildings when the style has the standard Mapbox streets data and no extrusions of its own
+      if (m.getSource('composite') && !layers.some(l => l.type === 'fill-extrusion')) {
+        m.addLayer({ id: 'lp-buildings', type: 'fill-extrusion', source: 'composite', 'source-layer': 'building', filter: ['==', ['get', 'extrude'], 'true'], minzoom: 15,
+          paint: { 'fill-extrusion-color': '#dcdad4', 'fill-extrusion-height': ['get', 'height'], 'fill-extrusion-base': ['get', 'min_height'], 'fill-extrusion-opacity': 0.85 } }, before);
+      }
+    } catch (e) {}
     map = m; return m;
   })();
   try { return await mapLoading; } finally { mapLoading = null; }
@@ -226,6 +221,13 @@ function arrowPts(dir) {
   if (/slight/.test(dir)) return [[-f * 6, 14], [-f * 6, 2], [f * 5, -10], [f * 5, -2], [f * 5, -10], [-f * 1, -10]];
   if (dir === 'uturn') return [[7, 14], [7, -6], [4, -12], [-4, -12], [-7, -6], [-7, 2], [-11, -3], [-7, 2], [-3, -3]];
   return [[-f * 9, 14], [-f * 9, -4], [-f * 2, -9], [f * 9, -9], [f * 3, -15], [f * 9, -9], [f * 3, -3]];
+}
+function drawLanes(lanes) {
+  const box = $('lanes'); const key = JSON.stringify(lanes);
+  if (box._k === key) return; box._k = key;
+  box.classList.toggle('hide', !lanes.length);
+  box.innerHTML = lanes.map(l => '<svg viewBox="-20 -20 40 40" fill="none" stroke="' + (l.a ? '#0d1a22' : '#b3bec6') + '" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' +
+    l.d.filter(d => d !== 'none').map(d => '<polyline points="' + arrowPts(d.replace(/([A-Z])/g, ' $1').toLowerCase()).map(q => q.join(',')).join(' ') + '"/>').join('') + '</svg>').join('');
 }
 const clock = s => new Date(Date.now() + s * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 function remainingRoute(lat, lon) {
@@ -246,7 +248,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && na
 
 function setNav(open) {
   navOpen = open; $('nav').classList.toggle('hide', !open); document.body.style.overflow = open ? 'hidden' : ''; wakeLock(open);
-  if (open) ensureMap().catch(() => { $('navmsg').textContent = 'Mappa non disponibile (rete?)'; });
+  if (open) ensureMap().catch(e => { $('navmsg').textContent = e && e.message === 'notoken' ? 'Manca il token Mapbox sul server (config.php)' : 'Mappa non disponibile (rete o token?)'; });
 }
 async function renderNav(s) {
   const route = s.route, p = s.pos;
@@ -256,7 +258,11 @@ async function renderNav(s) {
     $('bstreet').textContent = route.text || route.street || '';
     $('barrow').innerHTML = '<polyline points="' + arrowPts(route.modifier || '').map(q => q.join(',')).join(' ') + '"/>';
     $('parr').textContent = clock(route.remaining_s || 0); $('pmin').textContent = fmtMin(route.remaining_s || 0); $('pkm').textContent = fmtKm(route.remaining_m || 0);
+    drawLanes(route.lanes || []);
   }
+  const lim = route && route.limit_kmh, kmh = p ? Math.round(p.speed * 3.6) : 0;
+  $('limit').classList.toggle('hide', !lim); $('limit').textContent = lim || '';
+  $('spd').classList.toggle('hide', !p); $('spdv').textContent = kmh; $('spd').classList.toggle('over', !!lim && kmh > lim + 2);
   $('navmsg').textContent = !s.device_online ? 'Konik non raggiungibile' : (!p ? 'In attesa del GPS…' : '');
   if (!map || !p) return;
   const age = Math.max(0, Math.min(5, s.now - p.at));
