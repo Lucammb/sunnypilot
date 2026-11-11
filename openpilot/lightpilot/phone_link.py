@@ -2,7 +2,7 @@
 """Phone link: the navigation destination set from the phone app reaches the device, and survives reboots.
 
 A small server (lightpilot/phone/server) keeps the destination chosen on the phone. This process, run by the manager,
-asks it every few seconds (and reports the route's progress back, so the phone can show it), and:
+asks it every few seconds (and reports the car's position and the route's progress back, so the phone can show the map), and:
   - puts a new destination into NavDestination;
   - puts it back after a boot or an offroad transition (both clear NavDestination), while it is still fresh;
   - removes it when it is cancelled from the phone;
@@ -13,6 +13,7 @@ Settings in /data/lightpilot/phone.json: {"url": "https://example.com/nav/api.ph
 Without them the process just idles, so the manager does not restart it in a loop.
 """
 import json
+import math
 import os
 import time
 from collections.abc import Callable
@@ -22,6 +23,9 @@ import requests
 
 CONFIG_PATH = '/data/lightpilot/phone.json'
 POLL_SECONDS = 5.0
+LIVE_POLL_SECONDS = 2.0  # while navigating, the phone map follows the car
+ROUTE_POINT_SPACING_M = 15.0  # the route sent to the phone is thinned to this spacing at least
+ROUTE_MAX_POINTS = 600
 IDLE_SECONDS = 30.0
 MAX_BACKOFF = 30.0
 ARRIVED_WITHIN_M = 250.0  # NavDestination vanishing with less than this left on the route means "arrived"
@@ -37,16 +41,44 @@ def load_config(path: str = CONFIG_PATH) -> dict | None:
   return cfg
 
 
+def thin_route(coords: list[tuple[float, float]], spacing_m: float = ROUTE_POINT_SPACING_M, max_points: int = ROUTE_MAX_POINTS) -> list[list[float]]:
+  """The route as [[lat, lon], ...] with 5 decimals (~1 m), points closer than the spacing dropped, the last one always kept.
+  Long routes get a wider spacing so that there are at most max_points."""
+  if len(coords) < 2:
+    return [[round(la, 5), round(lo, 5)] for la, lo in coords]
+
+  def meters(a, b):
+    return math.hypot((b[0] - a[0]) * 111_320.0, (b[1] - a[1]) * 111_320.0 * math.cos(math.radians(a[0])))
+
+  total = sum(meters(a, b) for a, b in zip(coords[:-1], coords[1:], strict=True))
+  spacing = max(spacing_m, total / max_points)
+  kept = [coords[0]]
+  for point in coords[1:-1]:
+    if meters(kept[-1], point) >= spacing:
+      kept.append(point)
+  kept.append(coords[-1])
+  return [[round(la, 5), round(lo, 5)] for la, lo in kept]
+
+
+def route_key(coords: list[tuple[float, float]]) -> str:
+  """Cheap identity of a route: changes when the route does."""
+  if not coords:
+    return ''
+  return f'{len(coords)}:{coords[0][0]:.5f},{coords[0][1]:.5f}:{coords[-1][0]:.5f},{coords[-1][1]:.5f}'
+
+
 class PhoneLink:
   """One sync step at a time; every outside effect (server, params, route state) is injected so it can be tested."""
 
   def __init__(self, sync: Callable[[dict], dict], get_dest: Callable[[], dict | None], set_dest: Callable[[dict], None],
-               clear_dest: Callable[[], None], route_state: Callable[[], dict]):
+               clear_dest: Callable[[], None], route_state: Callable[[], dict], live: Callable[[], dict] | None = None):
     self.sync = sync
     self.get_dest = get_dest
     self.set_dest = set_dest
     self.clear_dest = clear_dest
     self.route_state = route_state
+    self.live = live  # the car's position and the route geometry for the phone map: {'pos', 'route_key', 'route_pts'}
+    self.sent_route_key: str | None = None
     self.applied_seq: int | None = None  # the server destination this process has put into the params
     self.was_present = False
     self.last_remaining = float('inf')
@@ -63,7 +95,23 @@ class PhoneLink:
       arrived = True
 
     report = {'seq': self.applied_seq, 'has_dest': present, 'arrived': arrived, **route}
-    resp = self.sync(report)
+    live = self.live() if self.live is not None else {}
+    points = live.get('route_pts')
+    key = live.get('route_key') or ''
+    if live.get('pos') is not None:
+      report['pos'] = live['pos']
+    report['route_key'] = key
+    if points and key != self.sent_route_key:
+      report['route_pts'] = points  # only when it changed: it is the big part of the message
+    try:
+      resp = self.sync(report)
+    except requests.HTTPError as e:
+      # An old server on the phone side refuses the big message (400): still do the destination part without the route.
+      if e.response is None or e.response.status_code != 400 or 'route_pts' not in report:
+        raise
+      report.pop('route_pts')
+      resp = self.sync(report)
+    self.sent_route_key = key if 'route_pts' in report else self.sent_route_key
     seq, dest = resp.get('seq'), resp.get('dest')
 
     if arrived:
@@ -109,7 +157,7 @@ def main() -> None:  # pragma: no cover - needs the device
   from openpilot.common.params import Params
 
   params = Params()
-  sm = messaging.SubMaster(['navInstruction'])
+  sm = messaging.SubMaster(['navInstruction', 'navRoute', 'gpsLocation', 'gpsLocationExternal'])
 
   def get_dest():
     return params.get('NavDestination')
@@ -123,8 +171,22 @@ def main() -> None:  # pragma: no cover - needs the device
     if sm.valid['navInstruction'] and sm.alive['navInstruction']:
       nav = sm['navInstruction']
       return {'remaining_m': float(nav.distanceRemaining), 'remaining_s': float(nav.timeRemaining),
-              'next_m': float(nav.maneuverDistance), 'text': nav.maneuverPrimaryText}
+              'next_m': float(nav.maneuverDistance), 'text': nav.maneuverPrimaryText,
+              'modifier': nav.maneuverModifier, 'street': nav.maneuverSecondaryText}
     return {'remaining_m': None}
+
+  def live() -> dict:
+    from openpilot.selfdrive.navigation.helpers import latest_gps_source
+    out: dict = {'pos': None, 'route_key': '', 'route_pts': None}
+    source = latest_gps_source(sm)
+    if source is not None:
+      gps = sm[source]
+      out['pos'] = {'lat': round(gps.latitude, 6), 'lon': round(gps.longitude, 6), 'bearing': round(gps.bearingDeg, 1), 'speed': round(gps.speed, 1)}
+    coords = [(c.latitude, c.longitude) for c in sm['navRoute'].coordinates] if sm.valid['navRoute'] else []
+    if coords:
+      out['route_key'] = route_key(coords)
+      out['route_pts'] = thin_route(coords)
+    return out
 
   link: PhoneLink | None = None
   loaded = None
@@ -137,10 +199,10 @@ def main() -> None:  # pragma: no cover - needs the device
       continue
     if link is None or cfg != loaded:
       loaded = cfg
-      link = PhoneLink(_http_sync(cfg), get_dest, set_dest, lambda: params.remove('NavDestination'), route_state)
+      link = PhoneLink(_http_sync(cfg), get_dest, set_dest, lambda: params.remove('NavDestination'), route_state, live)
     try:
       link.step()
-      delay = POLL_SECONDS
+      delay = LIVE_POLL_SECONDS if params.get('NavDestination') is not None else POLL_SECONDS
     except (requests.RequestException, ValueError):
       delay = min(MAX_BACKOFF, delay * 2)  # no network yet (just booted) or server down: keep what we have
     time.sleep(delay)

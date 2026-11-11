@@ -4,7 +4,7 @@
 
 ## Cosa aggiunge rispetto a sunnypilot
 
-- **Navigazione assistita**: destinazione e percorso (Mapbox) con mappa sempre visibile a metà schermo.
+- **Navigazione assistita**: destinazione e percorso (Mapbox). Sulla Konik vista a schermo intero con barra viaggio in basso e prossima manovra in alto a destra; la mappa completa (3D scura) è nella pagina del telefono (`openpilot/lightpilot/phone/server`).
 - **Velocità prima di rotonde, svolte e stop**: il limite scende dolcemente a 30 km/h (25 per gli stop) prima della zona. Frena soltanto, non accelera mai; l'acceleratore del guidatore ha sempre la precedenza.
 - **Svolta dalla rotta**: in sperimentale, suggerisce la direzione della svolta o dell'uscita dalla rotonda come se fosse acceso l'indicatore. Il blinker del guidatore ha sempre la priorità. **Nessun cambio di corsia automatico, mai.**
 - **Destinazione dal telefono**: pagina web per impostare/annullare la destinazione senza SSH (`openpilot/lightpilot/phone`).

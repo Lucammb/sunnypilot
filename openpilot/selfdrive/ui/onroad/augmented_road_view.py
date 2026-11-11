@@ -69,11 +69,8 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
     # Update calibration before rendering
     self._update_calibration()
 
-    # lightpilot: with a destination set, the left half is the road view and the right half the navigation map
-    full_rect = rect
+    # lightpilot: with a destination set, the next maneuver and the trip bar are drawn over the road view
     show_navigation = ui_state.navigation_enabled and ui_state.nav_destination_set
-    if show_navigation:
-      rect = rl.Rectangle(full_rect.x, full_rect.y, full_rect.width / 2, full_rect.height)
 
     # Create inner content area with border padding
     self._content_rect = rl.Rectangle(
@@ -112,10 +109,9 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
     self._draw_border(rect)
 
     if show_navigation:
-      self._navigation.render(rl.Rectangle(rect.x + rect.width, full_rect.y, full_rect.width - rect.width, full_rect.height))
+      self._navigation.render(self._content_rect)
 
   def close(self):
-    self._navigation.close()
     super().close()
 
   def _handle_mouse_press(self, _):

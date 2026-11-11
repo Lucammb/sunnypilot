@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lightpilot Nav</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#0b1116">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+:root{--bg:#0b1116;--card:#141c23;--line:#233039;--text:#eef3f6;--mute:#8fa1ad;--ok:#48eb84;--warn:#f2b84b;--bad:#ff6b6b}
+@media (prefers-color-scheme:light){:root{--bg:#f3f6f8;--card:#fff;--line:#d9e1e6;--text:#0d1a22;--mute:#5d707c;--ok:#0f9d4b;--warn:#b57a00;--bad:#d03a3a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,sans-serif;padding:max(16px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom))}
+main{max-width:520px;margin:0 auto;display:grid;gap:14px}
+h1{font-size:15px;font-weight:600;color:var(--mute);margin:4px 0 0;letter-spacing:.04em;text-transform:uppercase}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}
+.row{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--bad);flex:none}.dot.on{background:var(--ok)}
+.big{font-size:28px;font-weight:700;line-height:1.15}.mute{color:var(--mute);font-size:14px}.dest{font-size:18px;font-weight:600;overflow-wrap:anywhere}
+.status{font-weight:600}.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;outline:none}input:focus{border-color:var(--ok)}
+button{font:inherit;font-weight:600;border:0;border-radius:12px;padding:14px 16px;background:var(--ok);color:#04210f;min-height:48px;cursor:pointer}
+button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}button.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}button:disabled{opacity:.5}
+ul{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px}li button{width:100%;text-align:left;background:var(--bg);color:var(--text);border:1px solid var(--line);font-weight:500}
+li small{display:block;color:var(--mute);font-weight:400}
+.hide{display:none!important}.actions{display:flex;gap:10px;margin-top:12px}.actions button{flex:1}
+
+#nav{position:fixed;inset:0;z-index:10;background:#0d1115;color:#fff}#map{position:absolute;inset:0}
+#banner{position:absolute;left:10px;right:10px;top:max(10px,env(safe-area-inset-top));display:flex;gap:14px;align-items:center;padding:12px 16px;border-radius:18px;background:rgba(14,18,22,.88);backdrop-filter:blur(8px)}
+#banner svg{width:56px;height:56px;flex:none}#bdist{font-size:34px;font-weight:700;line-height:1}#bstreet{font-size:17px;color:#b9c4cb;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#bwrap{min-width:0}
+#me{position:absolute;left:50%;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none;filter:drop-shadow(0 3px 6px rgba(0,0,0,.6))}
+#pill{position:absolute;left:10px;right:10px;bottom:max(14px,env(safe-area-inset-bottom));display:flex;justify-content:space-around;align-items:center;padding:14px 8px;border-radius:999px;background:rgba(14,18,22,.9);font-size:22px;font-weight:700}
+#pmin{color:#48eb84}
+#menu{position:absolute;right:12px;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 76px);width:48px;height:48px;border-radius:50%;padding:0;font-size:22px;background:rgba(14,18,22,.9);color:#fff;border:1px solid #2a3640}
+#navmsg{position:absolute;left:0;right:0;top:50%;text-align:center;font-size:18px;color:#b9c4cb;padding:0 24px}
+.maplibregl-ctrl-bottom-left,.maplibregl-ctrl-bottom-right{bottom:84px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Lightpilot Nav</h1>
+
+  <section class="card" id="status">
+    <div class="row"><span class="status" id="line">Connessione…</span><span class="dot" id="dot"></span></div>
+    <div class="dest hide" id="dest"></div>
+    <div class="big hide" id="eta"></div>
+    <div class="mute hide" id="next"></div>
+    <div class="actions hide" id="cancelRow"><button class="ghost hide" id="openMap">Apri mappa</button><button class="danger" id="cancel">Annulla destinazione</button></div>
+  </section>
+
+  <section class="card">
+    <input id="q" type="search" placeholder="Dove vai? Via, città, locale…" autocomplete="off" enterkeyhint="search">
+    <ul id="results"></ul>
+    <div class="mute hide" id="none" style="margin-top:10px">Nessun risultato.</div>
+  </section>
+
+  <section class="card hide" id="recentCard">
+    <div class="mute">Recenti</div>
+    <ul id="recent"></ul>
+  </section>
+
+  <section class="card hide" id="confirm">
+    <div class="mute">Destinazione</div>
+    <div class="dest" id="cname"></div>
+    <div class="actions"><button class="ghost" id="no">Indietro</button><button id="go">Vai</button></div>
+  </section>
+</main>
+
+<div id="nav" class="hide">
+  <div id="map"></div>
+  <div id="banner"><svg id="barrow" viewBox="-20 -20 40 40" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></svg>
+    <div id="bwrap"><div id="bdist">—</div><div id="bstreet"></div></div></div>
+  <svg id="me" viewBox="-23 -23 46 46"><circle r="22" fill="rgba(48,104,186,.55)"/><path d="M0-14 L10 12 L0 6 L-10 12Z" fill="#fff"/></svg>
+  <div id="navmsg"></div>
+  <button id="menu" aria-label="Menu">☰</button>
+  <div id="pill"><span id="parr">--:--</span><span id="pmin">-- min</span><span id="pkm">-- km</span></div>
+</div>
+<script>
+const API = 'api.php';
+const $ = id => document.getElementById(id);
+let token = null, picked = null, timer = null;
+try { // the token comes once in the address (#t=...) and stays in this phone
+  const m = location.hash.match(/t=([A-Za-z0-9]+)/);
+  if (m) { localStorage.setItem('lpTok', m[1]); history.replaceState(null, '', location.pathname); }
+  token = localStorage.getItem('lpTok');
+} catch (e) {}
+
+async function call(action, body) {
+  const r = await fetch(API + '?a=' + action, { method: body ? 'POST' : 'GET', headers: { 'X-Token': token || '', 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) throw new Error(r.status === 401 ? 'token' : 'http');
+  return r.json();
+}
+const fmtKm = m => m < 1000 ? Math.round(m / 10) * 10 + ' m' : (m / 1000).toFixed(m < 10000 ? 1 : 0) + ' km';
+const fmtMin = s => { const m = Math.max(1, Math.round(s / 60)); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0'); };
+
+function render(s) {
+  const online = s.device_online, dest = s.dest, route = s.route;
+  $('dot').className = 'dot' + (online ? ' on' : '');
+  let line = online ? 'Konik collegato' : 'Konik non raggiungibile', cls = online ? 'ok' : 'bad';
+  if (dest && s.expired) { line = 'Destinazione scaduta'; cls = 'warn'; }
+  else if (dest && s.status === 'navigating') { line = 'Navigazione attiva'; cls = 'ok'; }
+  else if (dest) { line = online ? 'Inviata, in attesa del Konik…' : 'In attesa: il Konik si collega all’accensione'; cls = 'warn'; }
+  else if (s.status === 'arrived') { line = 'Arrivato'; cls = 'ok'; }
+  $('line').textContent = line; $('line').className = 'status ' + cls;
+  $('dest').classList.toggle('hide', !dest); $('dest').textContent = dest ? (dest.name || dest.lat + ', ' + dest.lon) : '';
+  $('cancelRow').classList.toggle('hide', !dest);
+  const navigating = !!dest && s.status === 'navigating' && !s.expired;
+  $('openMap').classList.toggle('hide', !navigating);
+  if (!navigating) { dismissed = false; routePts = []; routeKey = ''; if (map) map._lpPlaced = false; }
+  if (navigating && !dismissed && !navOpen) setNav(true);
+  if (!navigating && navOpen) setNav(false);
+  if (navOpen) renderNav(s);
+  const showRoute = dest && route && s.status === 'navigating' && s.now - route.at < 30;
+  $('eta').classList.toggle('hide', !showRoute); $('next').classList.toggle('hide', !showRoute);
+  if (showRoute) {
+    $('eta').textContent = fmtMin(route.remaining_s || 0) + ' · ' + fmtKm(route.remaining_m);
+    $('next').textContent = (route.text ? route.text + ' tra ' : '') + (route.text ? fmtKm(route.next_m || 0) : '');
+  }
+}
+async function poll() {
+  clearTimeout(timer);
+  if (!token) { $('line').textContent = 'Apri il link con il codice (…/#t=codice)'; $('line').className = 'status bad'; return; }
+  try { render(await call('state')); }
+  catch (e) { $('line').textContent = e.message === 'token' ? 'Codice non valido' : 'Server non raggiungibile'; $('line').className = 'status bad'; $('dot').className = 'dot'; }
+  timer = setTimeout(poll, document.hidden ? 15000 : navOpen ? LIVE_MS : 4000);
+}
+document.addEventListener('visibilitychange', poll);
+
+function recents() { try { return JSON.parse(localStorage.getItem('lpRecent') || '[]'); } catch (e) { return []; } }
+function remember(p) { try { const l = [p, ...recents().filter(x => x.name !== p.name)].slice(0, 8); localStorage.setItem('lpRecent', JSON.stringify(l)); } catch (e) {} drawRecent(); }
+function items(ul, list) {
+  ul.innerHTML = '';
+  list.forEach(p => { const li = document.createElement('li'), b = document.createElement('button');
+    const [a, ...rest] = p.name.split(', '); b.textContent = a;
+    if (rest.length) { const sm = document.createElement('small'); sm.textContent = rest.slice(0, 3).join(', '); b.appendChild(sm); }
+    b.onclick = () => pick(p); li.appendChild(b); ul.appendChild(li); });
+}
+function drawRecent() { const l = recents(); $('recentCard').classList.toggle('hide', !l.length); items($('recent'), l); }
+function pick(p) { picked = p; $('cname').textContent = p.name; $('confirm').classList.remove('hide'); $('confirm').scrollIntoView({ behavior: 'smooth' }); }
+
+let qt = null, qn = 0;
+$('q').addEventListener('input', () => { clearTimeout(qt); const v = $('q').value.trim(); if (v.length < 3) { $('results').innerHTML = ''; $('none').classList.add('hide'); return; }
+  qt = setTimeout(async () => { const n = ++qn;
+    try { const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=it&accept-language=it&q=' + encodeURIComponent(v));
+      const j = await r.json(); if (n !== qn) return;
+      const list = j.map(x => ({ lat: +x.lat, lon: +x.lon, name: x.display_name.replace(/, Italia$/, '') }));
+      $('none').classList.toggle('hide', list.length > 0); items($('results'), list);
+    } catch (e) { $('none').textContent = 'Ricerca non disponibile.'; $('none').classList.remove('hide'); } }, 550); });
+
+$('no').onclick = () => { picked = null; $('confirm').classList.add('hide'); };
+$('go').onclick = async () => { if (!picked) return; $('go').disabled = true;
+  try { await call('set', picked); remember(picked); $('confirm').classList.add('hide'); $('q').value = ''; $('results').innerHTML = ''; window.scrollTo({ top: 0, behavior: 'smooth' }); poll(); }
+  catch (e) { alert('Invio non riuscito'); } $('go').disabled = false; };
+$('cancel').onclick = async () => { if (confirm('Annullare la destinazione?')) { await call('clear', {}).catch(() => {}); poll(); } };
+
+
+// ---- live navigation map (MapLibre, OpenFreeMap tiles, dark grey style made here) ----
+const ML_JS = 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js';
+const ML_CSS = 'https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css';
+const ML_JS_SRI = 'sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj';
+const ML_CSS_SRI = 'sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V';
+const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
+const LIVE_MS = 1500, PITCH = 62, PAD_TOP_FRAC = 0.34;
+let map = null, mapLoading = null, navOpen = false, dismissed = false, routePts = [], routeKey = '', routeFetching = false, lastBearing = 0, wake = null;
+
+function loadLib() {
+  if (window.maplibregl) return Promise.resolve();
+  return new Promise((ok, fail) => {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = ML_CSS; l.integrity = ML_CSS_SRI; l.crossOrigin = 'anonymous'; document.head.appendChild(l);
+    const sc = document.createElement('script'); sc.src = ML_JS; sc.integrity = ML_JS_SRI; sc.crossOrigin = 'anonymous'; sc.onload = ok; sc.onerror = fail; document.head.appendChild(sc);
+  });
+}
+function darken(st) {
+  const C = { bg: '#0d1115', land: '#11171c', water: '#0a131a', park: '#0f1a16', road: '#8a949c', minor: '#5f6970', path: '#3b434a', text: '#aeb8bf' };
+  let firstSymbol = null;
+  st.layers.forEach(l => {
+    l.paint = l.paint || {}; l.layout = l.layout || {};
+    const id = l.id, t = l.type;
+    if (t === 'background') { l.paint['background-color'] = C.bg; }
+    else if (t === 'fill') {
+      delete l.paint['fill-pattern']; delete l.paint['fill-outline-color'];
+      if (/building/.test(id)) l.layout.visibility = 'none';
+      l.paint['fill-color'] = /water/.test(id) ? C.water : /park|wood|forest|grass|green|landcover|nature/.test(id) ? C.park : C.land;
+    } else if (t === 'line') {
+      if (/rail|transit|aerialway|ferry|boundary|admin|cable|ski/.test(id)) l.layout.visibility = 'none';
+      else if (/waterway|river|stream/.test(id)) l.paint['line-color'] = C.water;
+      else if (/casing/.test(id)) l.paint['line-color'] = C.bg;
+      else l.paint['line-color'] = /motorway|trunk|primary|major/.test(id) ? C.road : /path|pedestrian|track|foot|cycle|steps/.test(id) ? C.path : C.minor;
+    } else if (t === 'symbol') {
+      if (/poi|housenumber|airport|aeroway|peak|transport|rail|ferry|aerialway|shield/.test(id)) l.layout.visibility = 'none';
+      else { l.paint['text-color'] = C.text; l.paint['text-halo-color'] = C.bg; l.paint['text-halo-width'] = 1.6; }
+      if (!firstSymbol && l.layout.visibility !== 'none') firstSymbol = id;
+    } else if (t !== 'raster') { l.layout.visibility = 'none'; }
+  });
+  const src = Object.keys(st.sources).find(k => st.sources[k].type === 'vector');
+  const layer = { id: 'lp-buildings', type: 'fill-extrusion', source: src, 'source-layer': 'building', minzoom: 15,
+    paint: { 'fill-extrusion-color': '#1d252c', 'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 6], 'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': 0.9 } };
+  if (src) { const i = firstSymbol ? st.layers.findIndex(l => l.id === firstSymbol) : st.layers.length; st.layers.splice(i, 0, layer); }
+  return { st, before: firstSymbol };
+}
+async function ensureMap() {
+  if (map) return map;
+  if (mapLoading) return mapLoading;
+  mapLoading = (async () => {
+    await loadLib();
+    const { st, before } = darken(await (await fetch(STYLE_URL)).json());
+    const m = new maplibregl.Map({ container: 'map', style: st, center: [9.19, 45.46], zoom: 16, pitch: PITCH, attributionControl: { compact: true }, interactive: false, fadeDuration: 0 });
+    await new Promise(ok => m.on('load', ok));
+    m.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
+    const w = (a, b) => ['interpolate', ['exponential', 2], ['zoom'], 12, a, 20, b];
+    m.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#06210f', 'line-width': w(5, 120) } }, before || undefined);
+    m.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#48eb84', 'line-width': w(3, 80) } }, before || undefined);
+    map = m; return m;
+  })();
+  try { return await mapLoading; } finally { mapLoading = null; }
+}
+function advance(lat, lon, bearing, m) {
+  const b = bearing * Math.PI / 180;
+  return [lat + m * Math.cos(b) / 111320, lon + m * Math.sin(b) / (111320 * Math.cos(lat * Math.PI / 180))];
+}
+function arrowPts(dir) {
+  const f = /left/.test(dir) ? -1 : 1;
+  if (dir === '' || dir === 'straight') return [[0, 14], [0, -12], [-6, -5], [0, -12], [6, -5]];
+  if (/slight/.test(dir)) return [[-f * 6, 14], [-f * 6, 2], [f * 5, -10], [f * 5, -2], [f * 5, -10], [-f * 1, -10]];
+  if (dir === 'uturn') return [[7, 14], [7, -6], [4, -12], [-4, -12], [-7, -6], [-7, 2], [-11, -3], [-7, 2], [-3, -3]];
+  return [[-f * 9, 14], [-f * 9, -4], [-f * 2, -9], [f * 9, -9], [f * 3, -15], [f * 9, -9], [f * 3, -3]];
+}
+const clock = s => new Date(Date.now() + s * 1000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+function remainingRoute(lat, lon) {
+  if (routePts.length < 2) return [];
+  let best = 0, bd = Infinity;
+  routePts.forEach((p, i) => { const d = (p[0] - lat) ** 2 + ((p[1] - lon) * Math.cos(lat * Math.PI / 180)) ** 2; if (d < bd) { bd = d; best = i; } });
+  return [[lon, lat], ...routePts.slice(best + 1).map(p => [p[1], p[0]])];
+}
+async function fetchRoute(key) {
+  if (routeFetching) return; routeFetching = true;
+  try { const r = await call('route'); if (r.key) { routePts = r.pts; routeKey = r.key; } } catch (e) {} routeFetching = false;
+}
+async function wakeLock(on) {
+  try { if (on && 'wakeLock' in navigator && !wake) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); }
+        else if (!on && wake) { await wake.release(); wake = null; } } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && navOpen) wakeLock(true); });
+
+function setNav(open) {
+  navOpen = open; $('nav').classList.toggle('hide', !open); document.body.style.overflow = open ? 'hidden' : ''; wakeLock(open);
+  if (open) ensureMap().catch(() => { $('navmsg').textContent = 'Mappa non disponibile (rete?)'; });
+}
+async function renderNav(s) {
+  const route = s.route, p = s.pos;
+  if (s.route_key && s.route_key !== routeKey) fetchRoute(s.route_key);
+  if (route) {
+    $('bdist').textContent = fmtKm(route.next_m || 0);
+    $('bstreet').textContent = route.text || route.street || '';
+    $('barrow').innerHTML = '<polyline points="' + arrowPts(route.modifier || '').map(q => q.join(',')).join(' ') + '"/>';
+    $('parr').textContent = clock(route.remaining_s || 0); $('pmin').textContent = fmtMin(route.remaining_s || 0); $('pkm').textContent = fmtKm(route.remaining_m || 0);
+  }
+  $('navmsg').textContent = !s.device_online ? 'Konik non raggiungibile' : (!p ? 'In attesa del GPS…' : '');
+  if (!map || !p) return;
+  const age = Math.max(0, Math.min(5, s.now - p.at));
+  const [lat, lon] = advance(p.lat, p.lon, p.bearing, p.speed * age);
+  const [alat, alon] = advance(lat, lon, p.bearing, p.speed * LIVE_MS / 1000);
+  if (p.speed > 1.5) lastBearing = p.bearing;
+  const h = $('map').clientHeight, top = h * PAD_TOP_FRAC;
+  $('me').style.top = (top + (h - top) / 2) + 'px';
+  const zoom = p.speed > 22 ? 15.7 : p.speed > 12 ? 16.3 : 17.0;
+  const first = !map._lpPlaced; map._lpPlaced = true;
+  const cam = { center: [alon, alat], bearing: lastBearing, pitch: PITCH, zoom, padding: { top, bottom: 0, left: 0, right: 0 } };
+  if (first) map.jumpTo(cam); else map.easeTo({ ...cam, duration: LIVE_MS, easing: t => t });
+  const src = map.getSource('route'); if (src) src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: remainingRoute(lat, lon) } });
+}
+$('menu').onclick = () => { dismissed = true; setNav(false); };
+$('openMap').onclick = () => { dismissed = false; setNav(true); poll(); };
+
+drawRecent(); poll();
+</script>
+</body>
+</html>

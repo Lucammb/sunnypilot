@@ -161,3 +161,46 @@ def test_server_end_to_end(server):
   requests.post(server, params={'a': 'set'}, headers=phone, json=DEST)
   requests.post(server, params={'a': 'clear'}, headers=phone, json={})
   assert requests.post(server, params={'a': 'sync'}, headers=device, json={}).json()['dest'] is None
+
+
+def test_thin_route_keeps_ends_and_limits_points():
+  from openpilot.lightpilot.phone_link import thin_route
+  coords = [(45.0 + i * 0.00001, 9.0) for i in range(5000)]  # ~5.5 km, a point every 1.1 m
+  thinned = thin_route(coords)
+  assert thinned[0] == [45.0, 9.0] and thinned[-1] == [round(coords[-1][0], 5), 9.0]
+  assert 300 < len(thinned) < 400  # about one point per 15 m
+  long_route = [(45.0 + i * 0.0001, 9.0) for i in range(20000)]  # ~220 km
+  assert len(thin_route(long_route)) <= 603
+
+
+def test_route_is_sent_once_and_again_when_it_changes():
+  r = Rig()
+  state = {'pos': {'lat': 45.4, 'lon': 9.2, 'bearing': 90.0, 'speed': 8.0}, 'route_key': 'a', 'route_pts': [[45.4, 9.2], [45.41, 9.21]]}
+  r.link.live = lambda: state
+  r.link.step()
+  r.link.step()
+  assert 'route_pts' in r.reports[0] and 'route_pts' not in r.reports[1]
+  assert r.reports[1]['pos'] == state['pos'] and r.reports[1]['route_key'] == 'a'
+  state['route_key'] = 'b'
+  r.link.step()
+  assert 'route_pts' in r.reports[2]
+
+
+def test_old_server_refusing_the_route_does_not_break_the_destination():
+  r = Rig()
+  r.phone_sets()
+  calls = []
+
+  def picky_sync(report):
+    calls.append(dict(report))
+    if 'route_pts' in report:
+      resp = requests.Response()
+      resp.status_code = 400
+      raise requests.HTTPError(response=resp)
+    return {'seq': r.seq, 'dest': r.dest}
+
+  r.link.sync = picky_sync
+  r.link.live = lambda: {'pos': None, 'route_key': 'a', 'route_pts': [[45.4, 9.2], [45.41, 9.21]]}
+  r.link.step()
+  assert r.param == DEST  # the destination still got through
+  assert 'route_pts' in calls[0] and 'route_pts' not in calls[1]
