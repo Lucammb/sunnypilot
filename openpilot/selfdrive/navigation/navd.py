@@ -170,7 +170,7 @@ class RouteEngine:
     if self.step_idx is None:
       msg.valid = False
       self.pm.send('navInstruction', msg)
-      route_zones.write_zones([])  # lightpilot
+      route_zones.write_zones([], route=False)  # lightpilot: no route
       return
 
     assert self.route is not None and self.route_geometry is not None and self.last_position is not None

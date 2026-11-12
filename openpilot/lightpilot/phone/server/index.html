@@ -196,7 +196,8 @@ async function ensureMap() {
     const m = new mapboxgl.Map({ container: 'map', style: STYLE_URL, center: [9.19, 45.46], zoom: 16, pitch: PITCH, attributionControl: true, interactive: false, fadeDuration: 0 });
     await new Promise((ok, fail) => { m.on('load', ok); m.on('error', e => { if (!m.loaded() && e && e.error && /401|403|token|style/i.test(String(e.error.message || e.error.status))) fail(e.error); }); });
     const layers = m.getStyle().layers;
-    const before = (layers.find(l => l.type === 'symbol') || {}).id;
+    let lastLine = -1; layers.forEach((l, i) => { if (l.type === 'line') lastLine = i; }); // above every road and traffic line, below the next label
+    const before = (layers.slice(lastLine + 1).find(l => l.type === 'symbol') || {}).id;
     m.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
     const w = (a, b) => ['interpolate', ['exponential', 2], ['zoom'], 12, a, 20, b];
     m.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': w(6, 140) } }, before);
@@ -263,7 +264,7 @@ async function renderNav(s) {
   const lim = route && route.limit_kmh, kmh = p ? Math.round(p.speed * 3.6) : 0;
   $('limit').classList.toggle('hide', !lim); $('limit').textContent = lim || '';
   $('spd').classList.toggle('hide', !p); $('spdv').textContent = kmh; $('spd').classList.toggle('over', !!lim && kmh > lim + 2);
-  $('navmsg').textContent = !s.device_online ? 'Konik non raggiungibile' : (!p ? 'In attesa del GPS…' : '');
+  $('navmsg').textContent = !s.device_online ? 'Konik non raggiungibile' : (!p ? 'In attesa del GPS…' : (!s.route_key ? 'Percorso in arrivo dal Konik…' : ''));
   if (!map || !p) return;
   const age = Math.max(0, Math.min(5, s.now - p.at));
   const [lat, lon] = advance(p.lat, p.lon, p.bearing, p.speed * age);

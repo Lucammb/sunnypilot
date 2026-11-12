@@ -26,6 +26,7 @@ POLL_SECONDS = 5.0
 LIVE_POLL_SECONDS = 2.0  # while navigating, the phone map follows the car
 ROUTE_POINT_SPACING_M = 15.0  # the route sent to the phone is thinned to this spacing at least
 ROUTE_MAX_POINTS = 600
+RESEND_S = 8.0  # the route is not sent again sooner than this, whatever the server says
 IDLE_SECONDS = 30.0
 MAX_BACKOFF = 30.0
 ARRIVED_WITHIN_M = 250.0  # NavDestination vanishing with less than this left on the route means "arrived"
@@ -79,6 +80,8 @@ class PhoneLink:
     self.route_state = route_state
     self.live = live  # the car's position and the route geometry for the phone map: {'pos', 'route_key', 'route_pts'}
     self.sent_route_key: str | None = None
+    self.server_route_key: str | None = None  # the route the server says it holds (newer servers tell)
+    self.sent_at = float('-inf')
     self.applied_seq: int | None = None  # the server destination this process has put into the params
     self.was_present = False
     self.last_remaining = float('inf')
@@ -101,8 +104,13 @@ class PhoneLink:
     if live.get('pos') is not None:
       report['pos'] = live['pos']
     report['route_key'] = key
-    if points and key != self.sent_route_key:
-      report['route_pts'] = points  # only when it changed: it is the big part of the message
+    if not key:
+      self.sent_route_key = self.server_route_key = None  # the route is gone: the same one may come back, and must be sent again
+    held = self.server_route_key if self.server_route_key is not None else self.sent_route_key
+    now = time.monotonic()
+    if points and key != held and (key != self.sent_route_key or now - self.sent_at >= RESEND_S):
+      report['route_pts'] = points  # only when the server lacks it: it is the big part of the message
+      self.sent_at = now
     try:
       resp = self.sync(report)
     except requests.HTTPError as e:
@@ -113,6 +121,8 @@ class PhoneLink:
       resp = self.sync(report)
     self.sent_route_key = key if 'route_pts' in report else self.sent_route_key
     seq, dest = resp.get('seq'), resp.get('dest')
+    if 'route_key' in resp:
+      self.server_route_key = str(resp['route_key'])
 
     if arrived:
       self.applied_seq = seq  # whatever the server holds now is already settled

@@ -194,7 +194,7 @@ class TestNavdWritesZones(unittest.TestCase):
       self.assertAlmostEqual(zones[0]['start'], 50, delta=1.5)
       engine.clear_route()
       engine.send_instruction()
-      self.assertEqual(route_zones.read_zones()[0], [])  # no route: nothing to slow down for
+      self.assertIsNone(route_zones.read_zones())  # no route: no data at all
 
 
 if __name__ == '__main__':

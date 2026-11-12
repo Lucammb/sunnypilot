@@ -7,7 +7,7 @@ that lights up while experimental driving is active. See lightpilot/drive_mode.p
 import pyray as rl
 
 from openpilot.lightpilot.drive_mode import EXPERIMENTAL, read_choice, read_status, toggle_choice
-from openpilot.lightpilot.hud_layout import drive_mode_button, in_drive_mode_button
+from openpilot.lightpilot.hud_layout import DRIVE_MODE_BUTTON_PX, drive_mode_button, in_drive_mode_button
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -17,13 +17,15 @@ REFRESH_S = 0.5
 BACKGROUND = rl.Color(0, 0, 0, 166)
 STOCK_COLOR = rl.Color(255, 255, 255, 235)
 EXPERIMENTAL_COLOR = rl.Color(255, 155, 63, 255)
-IDLE_COLOR = rl.Color(166, 166, 166, 255)
+AUTO_COLOR = rl.Color(40, 200, 95, 255)
+ICON_FRACTION = 0.72  # the wheel's size in the button
 
 
 class DriveModeButton(Widget):
   def __init__(self):
     super().__init__()
     self._font = gui_app.font(FontWeight.BOLD)
+    self._wheel = gui_app.texture('icons/chffr_wheel.png', int(DRIVE_MODE_BUTTON_PX * ICON_FRACTION), int(DRIVE_MODE_BUTTON_PX * ICON_FRACTION))
     self._choice = read_choice()
     self._status: dict | None = None
     self._refresh_time = 0.0
@@ -59,21 +61,19 @@ class DriveModeButton(Widget):
     auto = self.automatic
     active = self._status['e2e'] if auto and self._status else self._choice == EXPERIMENTAL
     self._button = x, y, size = drive_mode_button(rect.x, rect.y, rect.width, self._navigation)
-    scale = size / 150
-    color = EXPERIMENTAL_COLOR if active else (IDLE_COLOR if auto else STOCK_COLOR)
+    color = AUTO_COLOR if auto else (EXPERIMENTAL_COLOR if active else STOCK_COLOR)
     center = rl.Vector2(x + size / 2, y + size / 2)
     rl.draw_circle_v(center, size / 2, BACKGROUND)
-    rl.draw_ring(center, size / 2 - 6 * scale, size / 2, 0, 360, 48, color if active else rl.Color(255, 255, 255, 75))
+    if auto and active:  # automatic, and the model's plan is the one driving right now
+      rl.draw_ring(center, size / 2 - 5, size / 2, 0, 360, 48, EXPERIMENTAL_COLOR)
 
-    # steering wheel
-    wheel = rl.Vector2(center.x, center.y - 16 * scale)
-    outer, rim = 40 * scale, 8 * scale
-    rl.draw_ring(wheel, outer - rim, outer, 0, 360, 48, color)
-    rl.draw_circle_v(wheel, 9 * scale, color)
-    for dx, dy in ((-1, 0), (1, 0), (0, 1)):
-      rl.draw_line_ex(wheel, rl.Vector2(wheel.x + dx * (outer - rim / 2), wheel.y + dy * (outer - rim / 2)), 7 * scale, color)
+    # the stock openpilot wheel; the icon is white, so the tint is the color
+    icon = size * ICON_FRACTION
+    src = rl.Rectangle(0, 0, self._wheel.width, self._wheel.height)
+    dst = rl.Rectangle(center.x - icon / 2, center.y - icon / 2, icon, icon)
+    rl.draw_texture_pro(self._wheel, src, dst, rl.Vector2(0, 0), 0.0, color)
 
     text = 'AUTO' if auto else ('EXP' if active else 'STOCK')
-    font_size = int(30 * scale)
+    font_size = int(size * 0.2)
     width = measure_text_cached(self._font, text, font_size).x
-    rl.draw_text_ex(self._font, text, rl.Vector2(center.x - width / 2, center.y + 30 * scale), font_size, 0, color)
+    rl.draw_text_ex(self._font, text, rl.Vector2(center.x - width / 2, y + size + 4), font_size, 0, color)

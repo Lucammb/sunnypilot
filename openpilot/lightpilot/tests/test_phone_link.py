@@ -204,3 +204,39 @@ def test_old_server_refusing_the_route_does_not_break_the_destination():
   r.link.step()
   assert r.param == DEST  # the destination still got through
   assert 'route_pts' in calls[0] and 'route_pts' not in calls[1]
+
+
+def test_route_is_sent_again_when_it_comes_back_or_the_server_lost_it(monkeypatch):
+  from openpilot.lightpilot import phone_link
+  clock = [1000.0]
+  monkeypatch.setattr(phone_link.time, 'monotonic', lambda: clock[0])
+  sent, server = [], {'key': ''}
+
+  def sync(report):
+    if 'route_pts' in report:
+      sent.append(report['route_pts'])
+      server['key'] = report['route_key']
+    if not report['route_key']:
+      server['key'] = ''  # like api.php: no route on the car, no route on the server
+    return {'seq': 1, 'dest': None, 'route_key': server['key']}
+
+  live = {'pos': None, 'route_key': 'K', 'route_pts': [[1.0, 2.0], [1.1, 2.1]]}
+  link = phone_link.PhoneLink(sync, lambda: None, lambda d: None, lambda: None, lambda: {'remaining_m': None}, lambda: live)
+  link.step()
+  clock[0] += 10
+  link.step()
+  assert len(sent) == 1  # the server holds it
+  server['key'] = ''  # the phone cleared the destination, the server dropped the route
+  clock[0] += 10
+  link.step()  # the answer tells the car that the server lost it
+  clock[0] += 10
+  link.step()
+  assert len(sent) == 2
+  live.update(route_key='', route_pts=None)  # route cleared on the car, then the same one again
+  clock[0] += 10
+  link.step()
+  live.update(route_key='K', route_pts=[[1.0, 2.0], [1.1, 2.1]])
+  server['key'] = ''
+  clock[0] += 10
+  link.step()
+  assert len(sent) == 3

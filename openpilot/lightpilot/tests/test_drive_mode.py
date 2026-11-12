@@ -165,3 +165,12 @@ class TestButtonLayout(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+def test_navd_without_route_is_not_a_route(tmp_path):
+  from openpilot.lightpilot import route_zones
+  path = str(tmp_path / "zones.json")
+  route_zones.write_zones([], path, now=100.0, route=False)
+  assert route_zones.read_zones(path, now=100.5) is None
+  route_zones.write_zones([], path, now=101.0)
+  assert route_zones.read_zones(path, now=101.5) == ([], 0.5)

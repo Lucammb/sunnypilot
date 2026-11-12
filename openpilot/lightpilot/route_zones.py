@@ -76,12 +76,13 @@ def zones_ahead(zones: list[dict], progress: float) -> list[dict]:
   return ahead[:MAX_ZONES]
 
 
-def write_zones(zones: list[dict], path: str | None = None, now: float | None = None) -> None:
+def write_zones(zones: list[dict], path: str | None = None, now: float | None = None, route: bool = True) -> None:
+  """route=False: navd is running but there is no route (the consumers then see no data at all)."""
   path = path or ZONES_PATH
   tmp = path + ".tmp"
   try:
     with open(tmp, "w") as f:
-      json.dump({'t': time.monotonic() if now is None else now, 'zones': zones}, f)
+      json.dump({'t': time.monotonic() if now is None else now, 'zones': zones, 'route': route}, f)
     os.replace(tmp, path)
   except OSError:
     pass
@@ -93,7 +94,7 @@ def read_zones(path: str | None = None, now: float | None = None) -> tuple[list[
     with open(path or ZONES_PATH) as f:
       data = json.load(f)
     age = (time.monotonic() if now is None else now) - float(data['t'])
-    if not 0 <= age <= MAX_AGE_S:
+    if not 0 <= age <= MAX_AGE_S or data.get('route', True) is False:
       return None
     return list(data['zones']), age
   except (OSError, ValueError, KeyError, TypeError):

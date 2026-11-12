@@ -110,7 +110,7 @@ flock($fh, LOCK_UN); fclose($fh);
 
 if ($role === 'device') {
   $live = $state['dest'] !== null && ($now - (int)$state['set_at']) < $ttl;
-  respond(200, ['seq' => $state['seq'], 'dest' => $live ? $state['dest'] : null]);
+  respond(200, ['seq' => $state['seq'], 'dest' => $live ? $state['dest'] : null, 'route_key' => (string)($state['device']['route_key'] ?? '')]);
 }
 $device = $state['device'];
 respond(200, [
