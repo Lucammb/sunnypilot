@@ -6,7 +6,8 @@ import datetime
 import pyray as rl
 
 from openpilot.common.constants import CV
-from openpilot.lightpilot.hud_layout import NAV_CARD_HEIGHT, NAV_CARD_MARGIN, NAV_CARD_WIDTH
+from openpilot.lightpilot.hud_layout import DRIVE_MODE_BADGE_PX, NAV_CARD_HEIGHT, NAV_CARD_MARGIN, NAV_CARD_WIDTH
+from openpilot.lightpilot.nav_exit import load_config as load_exit_config, read_advisory
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import FontWeight, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets import Widget
@@ -21,6 +22,10 @@ CARD_MARGIN = NAV_CARD_MARGIN
 PILL_WIDTH = 760
 PILL_HEIGHT = 84
 PILL_BOTTOM_MARGIN = 30
+ADVICE_COLOR = rl.Color(255, 176, 32, 245)
+ADVICE_TEXT_COLOR = rl.Color(26, 18, 0, 255)
+ADVICE_HEIGHT = 76
+ADVICE_REFRESH_S = 0.5
 LANE_MODIFIERS = {'slightLeft': 'slight left', 'slightRight': 'slight right'}  # capnp lane direction -> Mapbox modifier
 
 
@@ -58,6 +63,26 @@ class NavigationPanel(Widget):
   def __init__(self):
     super().__init__()
     self._primary = UnifiedLabel('', 34, FontWeight.MEDIUM, rl.Color(200, 210, 218, 255), scroll=True)
+    self._advice: dict | None = None
+    self._advice_time = float('-inf')
+    self._exit_config = load_exit_config()
+
+  def _draw_exit_advice(self, rect):
+    """'Keep right' before a motorway exit: under the maneuver card, left of the drive-mode badge."""
+    now = rl.get_time()
+    if now - self._advice_time >= ADVICE_REFRESH_S:
+      self._advice_time = now
+      self._advice = read_advisory(ui_state.sm['carState'].vEgo, self._exit_config)
+    if self._advice is None:
+      return
+    left = self._advice['side'] == 'left'
+    width = CARD_WIDTH - DRIVE_MODE_BADGE_PX - 16
+    pill = rl.Rectangle(rect.x + rect.width - CARD_WIDTH - CARD_MARGIN, rect.y + CARD_MARGIN + CARD_HEIGHT + 16 + (DRIVE_MODE_BADGE_PX - ADVICE_HEIGHT) / 2,
+                        width, ADVICE_HEIGHT)
+    rl.draw_rectangle_rounded(pill, 0.4, 12, ADVICE_COLOR)
+    self._draw_arrow(pill.x + 36, pill.y + ADVICE_HEIGHT / 2, 'slight left' if left else 'slight right', 1.6, ADVICE_TEXT_COLOR)
+    gui_label(rl.Rectangle(pill.x + 68, pill.y, width - 74, ADVICE_HEIGHT), 'TIENITI A SINISTRA' if left else 'TIENITI A DESTRA', 28, ADVICE_TEXT_COLOR,
+              FontWeight.BOLD)
 
   @property
   def routing(self):
@@ -102,4 +127,5 @@ class NavigationPanel(Widget):
       return
     instruction = ui_state.sm['navInstruction']
     self._draw_maneuver(instruction, rect)
+    self._draw_exit_advice(rect)
     self._draw_footer(instruction, rect)

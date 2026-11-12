@@ -4,7 +4,7 @@
 // phone also:  GET ?a=route -> {key, pts} (the route geometry, fetched when route_key changes)
 //              GET ?a=cfg   -> {mapbox} (public pk. token for the map, kept here and not in the page)
 // device (X-Token = device_token): POST ?a=sync {seq,has_dest,arrived,remaining_m,remaining_s,next_m,text,modifier,street,
-//                                                  limit_kmh,lanes[{d:[dir..],a,ad}],
+//                                                  limit_kmh,lanes[{d:[dir..],a,ad}],advice{side,m},
 //                                                  pos{lat,lon,bearing,speed},route_key,route_pts[[lat,lon]..]} -> {seq,dest}
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
@@ -44,6 +44,10 @@ $dirty = false;
 $action = $_GET['a'] ?? '';
 
 function num(mixed $v): ?float { return (is_int($v) || is_float($v)) && is_finite((float)$v) ? (float)$v : null; }
+function advice(mixed $v): ?array {
+  if (!is_array($v) || !in_array($v['side'] ?? '', ['left', 'right'], true) || num($v['m'] ?? null) === null) { return null; }
+  return ['side' => $v['side'], 'm' => num($v['m'])];
+}
 function lanes(mixed $v): array {
   $ok = ['none', 'left', 'right', 'straight', 'slightLeft', 'slightRight'];
   $out = [];
@@ -71,7 +75,7 @@ if ($role === 'phone' && $action === 'set') {
     $route = ['remaining_m' => num($body['remaining_m']), 'remaining_s' => num($body['remaining_s'] ?? null),
               'next_m' => num($body['next_m'] ?? null), 'text' => mb_substr((string)($body['text'] ?? ''), 0, 120),
               'modifier' => mb_substr((string)($body['modifier'] ?? ''), 0, 24), 'street' => mb_substr((string)($body['street'] ?? ''), 0, 120),
-              'limit_kmh' => num($body['limit_kmh'] ?? null), 'lanes' => lanes($body['lanes'] ?? null), 'at' => $now];
+              'limit_kmh' => num($body['limit_kmh'] ?? null), 'lanes' => lanes($body['lanes'] ?? null), 'advice' => advice($body['advice'] ?? null), 'at' => $now];
   }
   $state['device']['route'] = $route;
   $pos = $body['pos'] ?? null;

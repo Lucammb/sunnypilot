@@ -167,6 +167,7 @@ def main() -> None:  # pragma: no cover - needs the device
   from openpilot.common.params import Params
 
   params = Params()
+  from openpilot.lightpilot.nav_exit import read_advisory
   sm = messaging.SubMaster(['navInstruction', 'navRoute', 'gpsLocation', 'gpsLocationExternal'])
 
   def get_dest():
@@ -180,7 +181,9 @@ def main() -> None:  # pragma: no cover - needs the device
     sm.update(0)
     if sm.valid['navInstruction'] and sm.alive['navInstruction']:
       nav = sm['navInstruction']
-      return {'remaining_m': float(nav.distanceRemaining), 'remaining_s': float(nav.timeRemaining),
+      advice = read_advisory(0.0)  # the zones are at most a second old: close enough for a phone that polls every 2 s
+      return {'advice': None if advice is None else {'side': advice['side'], 'm': round(advice['distance'])},
+              'remaining_m': float(nav.distanceRemaining), 'remaining_s': float(nav.timeRemaining),
               'next_m': float(nav.maneuverDistance), 'text': nav.maneuverPrimaryText,
               'modifier': nav.maneuverModifier, 'street': nav.maneuverSecondaryText,
               'limit_kmh': round(float(nav.speedLimit) * 3.6) if nav.speedLimit > 0 else None,

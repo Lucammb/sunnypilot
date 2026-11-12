@@ -22,6 +22,7 @@ ROUNDABOUT_TYPES = ("roundabout", "rotary", "roundabout turn")
 TURN_TYPES = ("turn", "end of road")
 EXIT_TYPES = ("off ramp", "fork")
 TURN_ZONE_M = 15.0  # length of the crossing at an intersection
+MAX_RAMP_M = 400.0  # the exit speed is held at most this far along the ramp
 MAX_ROUNDABOUT_M = 100.0  # a ring is never longer; a longer step is a route that did not end it at the exit
 POINT_ZONE_M = 10.0  # length around a stop sign or traffic signal
 LOOKAHEAD_M = 1500.0
@@ -49,6 +50,9 @@ def extract_zones(route, route_geometry) -> list[dict]:
       zones.append({'kind': 'roundabout', 'start': starts[i], 'end': starts[i] + min(step['distance'], MAX_ROUNDABOUT_M), 'exit': maneuver.get('exit')})
     elif mtype in TURN_TYPES and modifier != 'straight':
       zones.append({'kind': 'turn', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier})
+    elif mtype == 'off ramp':  # the zone is the ramp itself: the exit speed is held along it (nav_exit.py)
+      zones.append({'kind': 'exit', 'start': starts[i], 'end': starts[i] + min(max(step['distance'], TURN_ZONE_M), MAX_RAMP_M), 'modifier': modifier,
+                    'ramp': True})
     elif mtype in EXIT_TYPES:
       zones.append({'kind': 'exit', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier})
 

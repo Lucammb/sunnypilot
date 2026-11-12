@@ -35,6 +35,7 @@ li small{display:block;color:var(--mute);font-weight:400}
 #bwrap{min-width:0}
 #lanes{display:flex;gap:4px;justify-content:center;padding:6px 10px;border-radius:14px;width:max-content;max-width:100%;margin:0 auto}
 #lanes svg{width:30px;height:30px}
+#advice{padding:9px 14px;border-radius:14px;background:#ffb020;color:#1a1200;font-weight:700;font-size:17px;text-align:center;box-shadow:0 4px 20px rgba(13,26,34,.28)}
 #me{position:absolute;left:50%;width:46px;height:46px;margin:-23px 0 0 -23px;pointer-events:none;filter:drop-shadow(0 3px 5px rgba(0,0,0,.35))}
 #pill{position:absolute;left:10px;right:10px;bottom:max(14px,env(safe-area-inset-bottom));display:flex;justify-content:space-around;align-items:center;padding:14px 8px;border-radius:999px;font-size:22px;font-weight:700}
 #pmin{color:#0f9d4b}
@@ -81,6 +82,7 @@ li small{display:block;color:var(--mute);font-weight:400}
   <div id="top">
     <div id="banner" class="glass"><svg id="barrow" viewBox="-20 -20 40 40" fill="none" stroke="#0d1a22" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></svg>
       <div id="bwrap"><div id="bdist">—</div><div id="bstreet"></div></div></div>
+    <div id="advice" class="hide"></div>
     <div id="lanes" class="glass hide"></div>
   </div>
   <svg id="me" viewBox="-23 -23 46 46"><circle r="22" fill="rgba(47,125,246,.28)"/><path d="M0-15 L11 13 L0 7 L-11 13Z" fill="#2f7df6" stroke="#fff" stroke-width="3" stroke-linejoin="round"/></svg>
@@ -260,6 +262,9 @@ async function renderNav(s) {
     $('barrow').innerHTML = '<polyline points="' + arrowPts(route.modifier || '').map(q => q.join(',')).join(' ') + '"/>';
     $('parr').textContent = clock(route.remaining_s || 0); $('pmin').textContent = fmtMin(route.remaining_s || 0); $('pkm').textContent = fmtKm(route.remaining_m || 0);
     drawLanes(route.lanes || []);
+    const adv = route.advice;
+    $('advice').classList.toggle('hide', !adv);
+    if (adv) $('advice').textContent = (adv.side === 'left' ? '← ' : '') + 'Prossima uscita · tieniti a ' + (adv.side === 'left' ? 'sinistra' : 'destra →');
   }
   const lim = route && route.limit_kmh, kmh = p ? Math.round(p.speed * 3.6) : 0;
   $('limit').classList.toggle('hide', !lim); $('limit').textContent = lim || '';

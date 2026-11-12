@@ -29,6 +29,13 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   lato dal percorso. La tua freccia ha sempre la precedenza; l'angolo cieco la blocca. Rotonde (opzionali): 1ª uscita =
   destra, 2ª = dritto, 3ª o oltre = sinistra. Si accende in `/data/lightpilot/config.json`:
   `{"nav_turn": {"enabled": true, "window_m": 25, "roundabout": false}}` (vale entro pochi secondi, senza riavvio).
+- **Uscite di tangenziale e autostrada** (`nav_exit.py`): avviso "tieniti a destra" sul Konik e sul telefono quando la
+  prossima manovra è un'uscita entro 1500 m. Velocità: sulle corsie di marcia solo fino a 80 km/h (mai meno) e solo vicino
+  all'uscita (ultimi ~600 m); sotto gli 80, fino alla velocità di svincolo (60 km/h), solo dopo la freccia dal lato
+  dell'uscita negli ultimi 400 m (2,5 s, o ancora accesa all'inizio dello svincolo). Senza freccia resta a 80 e 30 m dopo
+  l'uscita il limite sparisce. Nessun cambio corsia automatico. Opzioni in `/data/lightpilot/config.json`:
+  `{"nav_exit": {"enabled": true, "approach_kph": 80, "approach_m": 600, "ramp_kph": 60, "advise_m": 1500}}`
+  (`approach_kph` non scende sotto 80).
 - **Stock / sperimentale** (`drive_mode.py`): il software di base fa sempre partecipare il piano di velocità del modello
   (semafori, stop). Qui torna una scelta. Senza percorso: tocco sul pulsante in alto a destra (`STOCK` / `EXP`), scelta
   salvata in `/data/lightpilot/drive_mode`. Con un percorso: automatico (`AUTO`), sperimentale quando una rotonda, una
