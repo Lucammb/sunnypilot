@@ -66,8 +66,10 @@ def test_blinker_near_the_exit_brings_the_ramp_speed(tmp_path):
   d = Drive(tmp_path, 1400)
   d.run_to(250.0)
   assert d.v >= 80 * KPH - 0.01
-  d.run_to(-100.0, blinker=True)
-  assert d.exit.armed and d.exit.phase == 'ramp'
+  d.run_to(0.5, blinker=True)
+  assert d.exit.armed and d.v >= 80 * KPH - 0.01  # blinker on for 250 m, still on the motorway lanes: not below 80
+  d.run_to(-150.0, blinker=True)
+  assert d.exit.phase == 'ramp'
   assert abs(d.v - 60 * KPH) < 0.3
   assert d.max_decel <= 1.25
   d.run_to(-250.0)  # held along the ramp, also after the blinker went off

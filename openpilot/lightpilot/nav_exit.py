@@ -4,9 +4,10 @@ Two things, both from the route's "off ramp" maneuver (the point where the ramp 
 
 - an advisory, "next exit, keep right", for the screen and the phone (forks get the advisory too);
 - the speed. The car never changes lane by itself. On the motorway lanes it only slows to the approach speed, which is
-  never below 80 km/h, and only close to the exit. It slows further, to the ramp speed, only once the driver has shown
-  that the car is leaving: the blinker on the exit side, close to the exit, for a couple of seconds (or still on when the
-  ramp starts). Without the blinker the car stays at the approach speed and, once past the exit, the cap is dropped.
+  never below 80 km/h, and only close to the exit. It slows further, to the ramp speed, only on the ramp itself (past the
+  point where the ramp leaves the road) and only once the driver has shown that the car is leaving: the blinker on the
+  exit side, close to the exit, for a couple of seconds (or still on when the ramp starts). Without the blinker the
+  car stays at the approach speed and, once past the exit, the cap is dropped.
 
 Like the other caps it only ever lowers the target speed, and the gas pedal overrides it.
 
@@ -37,7 +38,7 @@ RAMP_DECEL = 0.5
 MAX_RAMP_DECEL = 1.2
 ARM_WINDOW_M = 400.0  # the blinker counts from this far before the ramp
 ARM_BLINK_S = 2.5  # blinker time that means "I am taking this exit"
-RAMP_REACH_M = 60.0  # the ramp speed is reached this far into the ramp, so the braking below 80 is done in the exit lane
+RAMP_REACH_M = 120.0  # the ramp speed is reached this far into the ramp: all the braking below 80 is done on the ramp
 MISSED_M = 30.0  # past the start of the ramp without the blinker: the car stayed on the motorway
 NEW_ZONE_JUMP_M = 100.0
 
@@ -143,8 +144,8 @@ class NavExit:
       if self.approach_decel is not None:
         best = (profile(start, approach, self.approach_decel), self.approach_decel, 'approach')
 
-    if self.armed and ramp < approach:
-      to_target = start + RAMP_REACH_M
+    if self.armed and ramp < approach and start <= 0.0:  # never below the approach speed before the ramp has left the road
+      to_target = max(start + RAMP_REACH_M, 0.0)
       if self.ramp_decel is None:
         needed = max(v_ego * v_ego - ramp * ramp, 0.0) / (2.0 * max(to_target, 30.0))
         self.ramp_decel = min(max(needed, RAMP_DECEL), MAX_RAMP_DECEL)
