@@ -42,7 +42,10 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   salvata in `/data/lightpilot/drive_mode`. Con un percorso: automatico (`AUTO`), sperimentale quando una rotonda, una
   svolta, uno stop o un semaforo del percorso è entro `max(150 m, 12 s)` e fino a 15 m dopo; altrove stock. Non lascia
   mai lo sperimentale da solo sotto 8 m/s mentre è il modello a frenare (auto ferma al rosso). Un semaforo che Mapbox
-  non conosce NON viene gestito in automatico. Opzioni in `config.json`:
+  non conosce NON viene gestito in automatico. Se i dati del percorso arrivano in ritardo (navd occupato a ricalcolare,
+  rete lenta) l'ultima decisione automatica resta valida fino a 15 s, invece di tornare alla scelta manuale. Il bottone
+  dice cosa sta guidando (`AUTO EXP` / `AUTO STOCK`): la camera grandangolare dipende solo dalla velocità, non dalla
+  modalità. Ogni decisione è scritta in `/data/lightpilot/mode.log` (`tail -f /data/lightpilot/mode.log`). Opzioni in `config.json`:
   `{"drive_mode": {"auto_in_navigation": true, "ahead_s": 12, "min_ahead_m": 150}}`.
 
 ### Prossime fasi

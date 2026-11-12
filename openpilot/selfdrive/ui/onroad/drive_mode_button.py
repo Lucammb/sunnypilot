@@ -73,7 +73,10 @@ class DriveModeButton(Widget):
     dst = rl.Rectangle(center.x - icon / 2, center.y - icon / 2, icon, icon)
     rl.draw_texture_pro(self._wheel, src, dst, rl.Vector2(0, 0), 0.0, color)
 
-    text = 'AUTO' if auto else ('EXP' if active else 'STOCK')
-    font_size = int(size * 0.2)
+    # automatic: say which one is driving right now, so that nobody has to guess it from the camera view (the wide camera
+    # at low speed is about speed, not about the mode)
+    text = ('AUTO EXP' if active else 'AUTO STOCK') if auto else ('EXP' if active else 'STOCK')
+    label_color = EXPERIMENTAL_COLOR if auto and active else color
+    font_size = int(size * (0.17 if auto else 0.2))
     width = measure_text_cached(self._font, text, font_size).x
-    rl.draw_text_ex(self._font, text, rl.Vector2(center.x - width / 2, y + size + 4), font_size, 0, color)
+    rl.draw_text_ex(self._font, text, rl.Vector2(center.x - width / 2, y + size + 4), font_size, 0, label_color)

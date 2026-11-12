@@ -11,6 +11,10 @@ compete with the cruise and lead-car plans. Here that is a choice again:
 The planner asks DriveMode.update() every cycle whether the model's plan takes part, and writes what it decided to a
 small file in /dev/shm that the UI reads. No cereal or params-key changes are needed.
 
+If the route data stops arriving for a few seconds (navd busy recomputing, slow network), the last automatic decision is kept
+for up to 15 s instead of falling back to the driver's choice. Every decision is written to /data/lightpilot/mode.log:
+  tail -f /data/lightpilot/mode.log
+
 Settings (optional) in /data/lightpilot/config.json:
   {"drive_mode": {"auto_in_navigation": true, "ahead_s": 12, "min_ahead_m": 150}}
 """
@@ -20,12 +24,15 @@ import time
 from pathlib import Path
 
 from openpilot.lightpilot.config import LIGHTPILOT_DIR
-from openpilot.lightpilot.route_zones import read_zones
+from openpilot.lightpilot.route_zones import HOLD_AGE_S, read_zones
 
 STOCK, EXPERIMENTAL = "stock", "experimental"
 DEFAULT_CHOICE = EXPERIMENTAL  # what the base software does when nobody has chosen
 CHOICE_FILE = LIGHTPILOT_DIR / "drive_mode"
 CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
+TRACE_FILE = LIGHTPILOT_DIR / "mode.log"
+TRACE_MAX_BYTES = 200_000
+TRACE_EVERY_S = 2.0  # while automatic: one line this often, besides every change
 STATUS_PATH = os.environ.get("LIGHTPILOT_DRIVE_MODE", "/dev/shm/lightpilot_drive_mode.json")
 STATUS_MAX_AGE_S = 3.0  # a status older than this is ignored by the UI: the planner is not running
 
@@ -95,6 +102,15 @@ def zone_ahead(zones: list[dict], v_ego: float, age: float, config: dict) -> str
   return None
 
 
+def describe_ahead(zones: list[dict], v_ego: float, age: float) -> str:
+  """'roundabout@132m' for the nearest zone that matters to the mode (distance from the car now), or 'none'."""
+  moved = v_ego * age
+  for zone in zones:
+    if zone.get('kind') in AUTO_KINDS and zone['end'] - moved >= -RELEASE_M:
+      return f"{zone['kind']}@{zone['start'] - moved:.0f}m"
+  return 'none'
+
+
 def write_status(e2e: bool, auto: bool, reason: str | None, path: str | None = None, now: float | None = None) -> None:
   path = path or STATUS_PATH
   tmp = path + ".tmp"
@@ -121,14 +137,30 @@ def read_status(path: str | None = None, now: float | None = None) -> dict | Non
 
 class DriveMode:
   def __init__(self, choice_path: Path | None = None, config_path: Path | None = None, zones_path: str | None = None,
-               status_path: str | None = None):
+               status_path: str | None = None, trace_path: Path | None = None):
     self.choice_path, self.config_path, self.zones_path, self.status_path = choice_path, config_path, zones_path, status_path
     self.choice = read_choice(choice_path)
     self.config = load_config(config_path)
     self.e2e = self.choice == EXPERIMENTAL
     self.auto = False
     self.reason: str | None = None
-    self._refresh_time = self._config_time = self._status_time = float('-inf')
+    self._refresh_time = self._config_time = self._status_time = self._trace_time = float('-inf')
+    self.trace_path = trace_path or TRACE_FILE
+    self.detail = 'no route'
+
+  def _trace(self, v_ego: float, now: float) -> None:
+    """One line per decision change, and every couple of seconds while automatic. A log must never get in the way."""
+    try:
+      path = Path(self.trace_path)
+      path.parent.mkdir(parents=True, exist_ok=True)
+      mode, e2e = 'AUTO' if self.auto else 'manual', 'yes' if self.e2e else 'no'
+      line = f"{time.strftime('%H:%M:%S')} v={v_ego * 3.6:.0f}km/h mode={mode} e2e={e2e} reason={self.reason} choice={self.choice} route_data={self.detail}"
+      if path.exists() and path.stat().st_size > TRACE_MAX_BYTES:
+        path.write_text('')
+      with path.open('a') as f:
+        f.write(line + '\n')
+    except Exception:
+      pass
 
   def _decide(self, v_ego: float, now: float) -> tuple[bool, bool, str | None, bool]:
     """(model plan takes part, automatic, reason, the driver just changed the choice)."""
@@ -140,9 +172,11 @@ class DriveMode:
     if now - self._config_time >= CONFIG_REFRESH_S:
       self._config_time, self.config = now, load_config(self.config_path)
 
-    data = read_zones(self.zones_path, now) if self.config['auto_in_navigation'] else None
+    data = read_zones(self.zones_path, now, HOLD_AGE_S) if self.config['auto_in_navigation'] else None
     if data is None:  # no route: the driver's choice
+      self.detail = 'no route' if self.config['auto_in_navigation'] else 'automatic off'
       return self.choice == EXPERIMENTAL, False, None, chosen
+    self.detail = f"age={data[1]:.1f}s next={describe_ahead(data[0], v_ego, data[1])}"
     kind = zone_ahead(data[0], v_ego, data[1], self.config)
     return kind is not None, True, kind, False
 
@@ -164,4 +198,7 @@ class DriveMode:
     if changed or now - self._status_time >= REFRESH_S:
       self._status_time = now
       write_status(self.e2e, self.auto, self.reason, self.status_path, now)
+    if changed or (self.auto and now - self._trace_time >= TRACE_EVERY_S):
+      self._trace_time = now
+      self._trace(v_ego, now)
     return self.e2e

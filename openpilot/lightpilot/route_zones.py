@@ -17,6 +17,7 @@ from openpilot.selfdrive.navigation.route import cumulative_distance
 
 ZONES_PATH = os.environ.get("LIGHTPILOT_ZONES", "/dev/shm/lightpilot_zones.json")
 MAX_AGE_S = 3.0  # a zones file older than this is ignored: navd is gone or the route is lost
+HOLD_AGE_S = 15.0  # the planner's caps and driving mode keep using a file this old (navd is busy recomputing the route, the network is slow)
 
 ROUNDABOUT_TYPES = ("roundabout", "rotary", "roundabout turn")
 TURN_TYPES = ("turn", "end of road")
@@ -92,13 +93,15 @@ def write_zones(zones: list[dict], path: str | None = None, now: float | None = 
     pass
 
 
-def read_zones(path: str | None = None, now: float | None = None) -> tuple[list[dict], float] | None:
-  """(zones, age in seconds) from the file, or None if it is missing, malformed or stale."""
+def read_zones(path: str | None = None, now: float | None = None, max_age: float = MAX_AGE_S) -> tuple[list[dict], float] | None:
+  """(zones, age in seconds) from the file, or None if it is missing, malformed or older than max_age.
+
+  The distances in the file were true `age` seconds ago: every consumer moves them by speed * age."""
   try:
     with open(path or ZONES_PATH) as f:
       data = json.load(f)
     age = (time.monotonic() if now is None else now) - float(data['t'])
-    if not 0 <= age <= MAX_AGE_S or data.get('route', True) is False:
+    if not 0 <= age <= max_age or data.get('route', True) is False:
       return None
     return list(data['zones']), age
   except (OSError, ValueError, KeyError, TypeError):

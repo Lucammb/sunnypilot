@@ -17,7 +17,7 @@ from pathlib import Path
 from openpilot.common.constants import CV
 from openpilot.common.swaglog import cloudlog
 from openpilot.lightpilot.config import LIGHTPILOT_DIR
-from openpilot.lightpilot.route_zones import read_zones
+from openpilot.lightpilot.route_zones import HOLD_AGE_S, read_zones
 
 CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
 CONFIG_REFRESH_S = 5.0
@@ -93,7 +93,7 @@ class NavSpeedCap:
     if not self.config['enabled']:
       return v_target, a_target
     try:  # the planner must never fail because of the cap: on any problem, no cap
-      data = read_zones(self.zones_path)
+      data = read_zones(self.zones_path, max_age=HOLD_AGE_S)
       if data is None:
         return v_target, a_target
       cap = compute_cap(data[0], self.config, v_ego, data[1])

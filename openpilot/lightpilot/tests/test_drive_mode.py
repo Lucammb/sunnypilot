@@ -17,9 +17,10 @@ class Files(unittest.TestCase):
     self.addCleanup(self.dir.cleanup)
     root = Path(self.dir.name)
     self.choice, self.config, self.zones, self.status = root / "drive_mode", root / "config.json", str(root / "zones.json"), str(root / "status.json")
+    self.trace = root / "mode.log"
 
   def mode(self) -> DriveMode:
-    return DriveMode(self.choice, self.config, self.zones, self.status)
+    return DriveMode(self.choice, self.config, self.zones, self.status, self.trace)
 
   def route(self, zones, now=100.0):
     write_zones(zones, self.zones, now=now)
@@ -110,10 +111,10 @@ class TestDriveMode(Files):
     mode = self.mode()
     self.route([{'kind': 'signal', 'start': 5.0, 'end': 15.0}])
     self.assertTrue(mode.update(0.0, True, now=100.0))  # stopped at the light, the model holds the car
-    # the route is lost (stale file) while waiting: the driver's choice is stock, but the model still holds the car
-    self.assertTrue(mode.update(0.0, True, now=110.0))
-    self.assertEqual(read_status(self.status, now=110.0)['reason'], 'hold')
-    self.assertFalse(mode.update(0.0, False, now=111.0))  # green: the model lets go, back to stock
+    # the route is lost (file far too old) while waiting: the driver's choice is stock, but the model still holds the car
+    self.assertTrue(mode.update(0.0, True, now=130.0))
+    self.assertEqual(read_status(self.status, now=130.0)['reason'], 'hold')
+    self.assertFalse(mode.update(0.0, False, now=131.0))  # green: the model lets go, back to stock
     # the same past the end of a zone
     self.route([{'kind': 'stop', 'start': 2.0, 'end': 12.0}], now=120.0)
     self.assertTrue(mode.update(1.0, True, now=120.0))
@@ -133,6 +134,50 @@ class TestDriveMode(Files):
     Path(self.zones).write_text("{broken")
     write_choice(STOCK, self.choice)
     self.assertFalse(self.mode().update(14.0, False, now=100.0))
+
+  def test_a_late_route_file_does_not_drop_the_automatic_decision(self):
+    write_choice(STOCK, self.choice)  # the driver's own choice is stock: the fallback that used to win
+    mode = self.mode()
+    self.route([{'kind': 'roundabout', 'start': 120.0, 'end': 180.0}], now=100.0)
+    self.assertTrue(mode.update(14.0, False, now=100.0))
+    # navd is busy for 8 s: the file is 8 s old, the car has moved 112 m towards the roundabout
+    self.assertTrue(mode.update(14.0, False, now=108.0))
+    self.assertEqual(read_status(self.status, now=108.0), {'e2e': True, 'auto': True, 'reason': 'roundabout'})
+    # a file this late still says where the roundabout is: 120 m - 14 m/s * 12 s = -48 m, still inside it
+    self.assertTrue(mode.update(14.0, False, now=112.0))
+    # after 15 s without news the route is considered lost: back to the driver's choice (stock)
+    self.assertFalse(mode.update(14.0, False, now=116.0))
+    self.assertFalse(read_status(self.status, now=116.0)['auto'])
+
+  def test_an_explicit_no_route_is_immediate(self):
+    write_choice(STOCK, self.choice)
+    mode = self.mode()
+    self.route([{'kind': 'roundabout', 'start': 100.0, 'end': 160.0}], now=100.0)
+    self.assertTrue(mode.update(14.0, False, now=100.0))
+    write_zones([], self.zones, now=100.5, route=False)  # navd: the route was cancelled
+    self.assertFalse(mode.update(14.0, False, now=100.6))
+    self.assertFalse(read_status(self.status, now=100.6)['auto'])
+
+  def test_decisions_are_logged(self):
+    write_choice(STOCK, self.choice)
+    mode = self.mode()
+    self.route([{'kind': 'roundabout', 'start': 100.0, 'end': 160.0}], now=100.0)
+    mode.update(14.0, False, now=100.0)
+    mode.update(14.0, False, now=100.5)  # nothing changed, too soon for another line
+    mode.update(14.0, False, now=102.5)  # automatic: a line every couple of seconds
+    lines = self.trace.read_text().splitlines()
+    self.assertEqual(len(lines), 2)
+    self.assertIn('mode=AUTO', lines[0])
+    self.assertIn('e2e=yes', lines[0])
+    self.assertIn('reason=roundabout', lines[0])
+    self.assertIn('next=roundabout@100m', lines[0])
+    self.assertIn('v=50km/h', lines[0])
+    self.assertIn('choice=stock', lines[0])
+
+  def test_a_log_that_cannot_be_written_changes_nothing(self):
+    (Path(self.dir.name) / "file").write_text("x")
+    mode = DriveMode(self.choice, self.config, self.zones, self.status, Path(self.dir.name) / "file" / "mode.log")
+    self.assertTrue(mode.update(14.0, False, now=100.0))
 
   def test_status_goes_stale(self):
     self.mode().update(14.0, False, now=100.0)

@@ -84,6 +84,29 @@ class TestZones(unittest.TestCase):
       Path(path).write_text('{not json')
       self.assertIsNone(route_zones.read_zones(path))
 
+  def test_older_files_are_read_when_asked(self):
+    with tempfile.TemporaryDirectory() as d:
+      path = str(Path(d) / 'zones.json')
+      route_zones.write_zones([{'kind': 'turn', 'start': 50, 'end': 65}], path, now=100.0)
+      self.assertIsNone(route_zones.read_zones(path, now=108.0))  # too old for the screen and the phone
+      self.assertEqual(route_zones.read_zones(path, now=108.0, max_age=route_zones.HOLD_AGE_S)[1], 8.0)  # the planner still uses it
+      self.assertIsNone(route_zones.read_zones(path, now=100.0 + route_zones.HOLD_AGE_S + 0.1, max_age=route_zones.HOLD_AGE_S))
+      route_zones.write_zones([], path, now=107.0, route=False)  # no route is no route, however fresh or old the limit
+      self.assertIsNone(route_zones.read_zones(path, now=107.5, max_age=route_zones.HOLD_AGE_S))
+
+
+class TestCapKeepsWorkingWhenNavdIsLate(unittest.TestCase):
+  def test_cap_still_applies_with_a_file_8_s_old(self):
+    import time
+    with tempfile.TemporaryDirectory() as d:
+      path = str(Path(d) / 'zones.json')
+      # written 8 s ago, roundabout 200 m ahead of the car then; the car has covered 8 * 13.9 = 111 m since
+      route_zones.write_zones([{'kind': 'roundabout', 'start': 200.0, 'end': 280.0}], path, now=time.monotonic() - 8.0)
+      cap = NavSpeedCap(config_path=Path(d) / 'none.json', zones_path=path)
+      v_target, _ = cap.update(50 * KPH, 90 * KPH, 0.0)
+      self.assertLess(v_target, 90 * KPH)
+      self.assertEqual(cap.kind, 'roundabout')
+
 
 class TestCap(unittest.TestCase):
   def test_allowed_speed_profile(self):

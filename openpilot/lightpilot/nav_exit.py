@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 from openpilot.lightpilot.config import LIGHTPILOT_DIR
-from openpilot.lightpilot.route_zones import read_zones
+from openpilot.lightpilot.route_zones import HOLD_AGE_S, read_zones
 
 CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
 CONFIG_REFRESH_S = 5.0
@@ -165,7 +165,7 @@ class NavExit:
         self._config_t, self.config = now, load_config(self.config_path)
       if not self.config['enabled']:
         return v_target, a_target
-      data = read_zones(self.zones_path, now)
+      data = read_zones(self.zones_path, now, HOLD_AGE_S)
       if data is None:
         self._reset()
         return v_target, a_target
