@@ -23,7 +23,9 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   `NavDestination` viene cancellata a ogni avvio e a ogni passaggio offroad: va reimpostata dopo ogni accensione.
 
 ### Fase 2 — anticipazione eventi (vedi anche `openpilot/lightpilot/LIGHTPILOT.md`)
-- Tetto di velocità prima di rotonde, svolte e stop (`speed_cap.py`); solo frena, il gas lo supera.
+- Tetto di velocità prima di rotonde, svolte e stop (`speed_cap.py`); solo frena, il gas lo supera. Svolte leggere
+  ("tieni la destra"): 50 km/h (`slight_turn_kph`). Dopo ogni tetto (rotonda, svolta, uscita) la velocità torna a
+  1,0 m/s² (`resume_accel`), non a pieno gas. Fuori percorso o senza GPS da più di 15 s: nessun tetto.
 - **Svolta automatica da navigazione** (`nav_turn.py`, spenta di default): a una svolta del percorso, senza freccia, sotto
   la velocità `LaneTurnValue` e con `LaneTurnDesire` attivo, il controller delle svolte (`lane_turn_desire.py`) riceve il
   lato dal percorso. La tua freccia ha sempre la precedenza; l'angolo cieco la blocca. Rotonde (opzionali): 1ª uscita =
@@ -39,14 +41,15 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   (`approach_kph` non scende sotto 80).
 - **Stock / sperimentale** (`drive_mode.py`): il software di base fa sempre partecipare il piano di velocità del modello
   (semafori, stop). Qui torna una scelta. Senza percorso: tocco sul pulsante in alto a destra (`STOCK` / `EXP`), scelta
-  salvata in `/data/lightpilot/drive_mode`. Con un percorso: automatico (`AUTO`), sperimentale quando una rotonda, una
-  svolta, uno stop o un semaforo del percorso è entro `max(150 m, 12 s)` e fino a 15 m dopo; altrove stock. Non lascia
-  mai lo sperimentale da solo sotto 8 m/s mentre è il modello a frenare (auto ferma al rosso). Un semaforo che Mapbox
-  non conosce NON viene gestito in automatico. Se i dati del percorso arrivano in ritardo (navd occupato a ricalcolare,
+  salvata in `/data/lightpilot/drive_mode`. Con un percorso: automatico (`AUTO`), sperimentale sempre sotto i 60 km/h
+  (`slow_kph`, torna stock sopra i 65) e, a qualsiasi velocità, quando una rotonda, una svolta, uno stop o un semaforo
+  del percorso è entro `max(150 m, 12 s)` e fino a 15 m dopo; altrove stock. Non lascia mai lo sperimentale da solo
+  mentre è il modello a frenare (auto ferma al rosso, o in rallentamento vero a qualsiasi velocità). Sopra i 65 km/h un
+  semaforo che Mapbox non conosce NON viene gestito in automatico. Se i dati del percorso arrivano in ritardo (navd occupato a ricalcolare,
   rete lenta) l'ultima decisione automatica resta valida fino a 15 s, invece di tornare alla scelta manuale. Il bottone
   dice cosa sta guidando (`AUTO EXP` / `AUTO STOCK`): la camera grandangolare dipende solo dalla velocità, non dalla
   modalità. Ogni decisione è scritta in `/data/lightpilot/mode.log` (`tail -f /data/lightpilot/mode.log`). Opzioni in `config.json`:
-  `{"drive_mode": {"auto_in_navigation": true, "ahead_s": 12, "min_ahead_m": 150}}`.
+  `{"drive_mode": {"auto_in_navigation": true, "slow_kph": 60, "ahead_s": 12, "min_ahead_m": 150}}`.
 
 ### Prossime fasi
 2. Avviso corsia per uscite/bivi; poi deceleriamo verso l'uscita dopo un cambio corsia manuale.

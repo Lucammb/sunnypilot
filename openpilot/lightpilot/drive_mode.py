@@ -5,8 +5,9 @@ compete with the cruise and lead-car plans. Here that is a choice again:
 
 - without a navigation route, the driver picks: "stock" (cruise and lead car only) or "experimental" (the model's plan
   too), with the button at the top right of the road view. The choice is kept in /data/lightpilot/drive_mode.
-- with a navigation route, it is automatic: experimental from shortly before a roundabout, a turn, a stop sign or a
-  traffic signal on the route until just past it, stock everywhere else.
+- with a navigation route, it is automatic: experimental below 60 km/h (town driving: traffic lights and roundabouts
+  the map may not know) and, at any speed, from shortly before a roundabout, a turn, a stop sign or a traffic signal on
+  the route until just past it; stock everywhere else (fast roads).
 
 The planner asks DriveMode.update() every cycle whether the model's plan takes part, and writes what it decided to a
 small file in /dev/shm that the UI reads. No cereal or params-key changes are needed.
@@ -16,7 +17,8 @@ for up to 15 s instead of falling back to the driver's choice. Every decision is
   tail -f /data/lightpilot/mode.log
 
 Settings (optional) in /data/lightpilot/config.json:
-  {"drive_mode": {"auto_in_navigation": true, "ahead_s": 12, "min_ahead_m": 150}}
+  {"drive_mode": {"auto_in_navigation": true, "slow_kph": 60, "ahead_s": 12, "min_ahead_m": 150}}
+slow_kph: experimental below this speed (0: only near the zones of the route). It goes back to stock 5 km/h above it.
 """
 import json
 import os
@@ -36,7 +38,7 @@ TRACE_EVERY_S = 2.0  # while automatic: one line this often, besides every chang
 STATUS_PATH = os.environ.get("LIGHTPILOT_DRIVE_MODE", "/dev/shm/lightpilot_drive_mode.json")
 STATUS_MAX_AGE_S = 3.0  # a status older than this is ignored by the UI: the planner is not running
 
-DEFAULTS = {'auto_in_navigation': True, 'ahead_s': 12.0, 'min_ahead_m': 150.0}
+DEFAULTS = {'auto_in_navigation': True, 'slow_kph': 60.0, 'ahead_s': 12.0, 'min_ahead_m': 150.0}
 AUTO_KINDS = ('roundabout', 'turn', 'stop', 'signal')
 RELEASE_M = 15.0  # stay experimental this far past the end of the zone
 HOLD_BELOW_MS = 8.0  # never drop the model's plan by itself below this speed while that plan is the one braking
@@ -45,6 +47,8 @@ REFRESH_S = 0.5  # how often the choice file is read and the status file written
 CONFIG_REFRESH_S = 5.0
 MIN_AHEAD_S, MAX_AHEAD_S = 5.0, 30.0
 MIN_AHEAD_M, MAX_AHEAD_M = 50.0, 600.0
+MAX_SLOW_KPH = 130.0
+SLOW_HYSTERESIS_MS = 5.0 / 3.6  # back to stock this far above slow_kph, so that it does not flip at 60
 
 
 def read_choice(path: Path | None = None) -> str:
@@ -80,12 +84,13 @@ def load_config(path: Path | None = None) -> dict:
     user = json.loads((path or CONFIG_FILE).read_text()).get('drive_mode', {})
     if isinstance(user.get('auto_in_navigation'), bool):
       config['auto_in_navigation'] = user['auto_in_navigation']
-    for key in ('ahead_s', 'min_ahead_m'):
+    for key in ('slow_kph', 'ahead_s', 'min_ahead_m'):
       value = user.get(key)
       if isinstance(value, (int, float)) and not isinstance(value, bool):
         config[key] = float(value)
   except (OSError, ValueError, AttributeError):
     pass
+  config['slow_kph'] = min(max(config['slow_kph'], 0.0), MAX_SLOW_KPH)
   config['ahead_s'] = min(max(config['ahead_s'], MIN_AHEAD_S), MAX_AHEAD_S)
   config['min_ahead_m'] = min(max(config['min_ahead_m'], MIN_AHEAD_M), MAX_AHEAD_M)
   return config
@@ -148,6 +153,7 @@ class DriveMode:
     self._refresh_time = self._config_time = self._status_time = self._trace_time = float('-inf')
     self.trace_path = trace_path or TRACE_FILE
     self.detail = 'no route'
+    self.slow = False  # automatic: below slow_kph (with hysteresis)
 
   def _trace(self, v_ego: float, now: float) -> None:
     """One line per decision change, and every couple of seconds while automatic. A log must never get in the way."""
@@ -175,10 +181,15 @@ class DriveMode:
 
     data = read_zones(self.zones_path, now, HOLD_AGE_S) if self.config['auto_in_navigation'] else None
     if data is None:  # no route: the driver's choice
+      self.slow = False
       self.detail = 'no route' if self.config['auto_in_navigation'] else 'automatic off'
       return self.choice == EXPERIMENTAL, False, None, chosen
     self.detail = f"age={data[1]:.1f}s next={describe_ahead(data[0], v_ego, data[1])}"
     kind = zone_ahead(data[0], v_ego, data[1], self.config)
+    slow_ms = self.config['slow_kph'] / 3.6
+    self.slow = slow_ms > 0 and v_ego < slow_ms + (SLOW_HYSTERESIS_MS if self.slow else 0.0)
+    if kind is None and self.slow:
+      kind = 'slow'
     return kind is not None, True, kind, False
 
   def update(self, v_ego: float, e2e_braking: bool, e2e_accel: float = 0.0, now: float | None = None) -> bool:

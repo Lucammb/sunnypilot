@@ -19,7 +19,10 @@ class Files(unittest.TestCase):
     self.choice, self.config, self.zones, self.status = root / "drive_mode", root / "config.json", str(root / "zones.json"), str(root / "status.json")
     self.trace = root / "mode.log"
 
-  def mode(self) -> DriveMode:
+  def mode(self, slow_kph: float | None = 0) -> DriveMode:
+    """slow_kph=0: only the zones of the route decide (what most tests are about); None: the default."""
+    if slow_kph is not None:
+      self.config.write_text(json.dumps({'drive_mode': {'slow_kph': slow_kph}}))
     return DriveMode(self.choice, self.config, self.zones, self.status, self.trace)
 
   def route(self, zones, now=100.0):
@@ -125,7 +128,7 @@ class TestDriveMode(Files):
   def test_automatic_can_be_turned_off(self):
     self.config.write_text(json.dumps({'drive_mode': {'auto_in_navigation': False}}))
     write_choice(STOCK, self.choice)
-    mode = self.mode()
+    mode = self.mode(slow_kph=None)
     self.route([{'kind': 'signal', 'start': 20.0, 'end': 30.0}])
     self.assertFalse(mode.update(14.0, False, now=100.0))
     self.assertFalse(read_status(self.status, now=100.0)['auto'])
@@ -184,6 +187,20 @@ class TestDriveMode(Files):
     self.assertIsNotNone(read_status(self.status, now=102.0))
     self.assertIsNone(read_status(self.status, now=104.0))
     self.assertIsNone(read_status(self.status + ".missing", now=100.0))
+
+  def test_on_a_route_experimental_below_60_stock_above(self):
+    write_choice(STOCK, self.choice)
+    mode = self.mode(slow_kph=None)
+    self.route([{'kind': 'turn', 'start': 3000.0, 'end': 3015.0, 'modifier': 'left'}])  # nothing near
+    self.assertTrue(mode.update(50 / 3.6, False, now=100.0))  # town: traffic lights the map does not know
+    self.assertEqual(read_status(self.status, now=100.0)['reason'], 'slow')
+    self.assertTrue(mode.update(63 / 3.6, False, now=100.1))  # not flipping around 60
+    self.assertFalse(mode.update(66 / 3.6, False, now=100.2))
+    self.assertFalse(mode.update(61 / 3.6, False, now=100.3))
+    self.assertTrue(mode.update(59 / 3.6, False, now=100.4))
+    self.route([], now=200.0)
+    write_zones([], self.zones, now=200.0, route=False)  # no route: the driver's choice again, whatever the speed
+    self.assertFalse(mode.update(30 / 3.6, False, now=200.6))
 
   def test_not_dropped_at_speed_while_the_model_is_slowing_the_car(self):
     write_choice(STOCK, self.choice)
