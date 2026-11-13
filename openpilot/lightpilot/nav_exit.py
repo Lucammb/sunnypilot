@@ -104,6 +104,7 @@ class NavExit:
     self.config = load_config(config_path)
     self._config_t = self._last_t = float('-inf')
     self.phase: str | None = None  # 'approach' or 'ramp' while this cap is the one lowering the speed
+    self.decel = 0.0  # the deceleration it then asks for
     self._reset()
 
   def _reset(self) -> None:
@@ -159,7 +160,7 @@ class NavExit:
     now = time.monotonic() if now is None else now
     dt = min(max(now - self._last_t, 0.0), 0.5)
     self._last_t = now
-    self.phase = None
+    self.phase, self.decel = None, 0.0
     try:  # the planner must never fail because of this: on any problem, no cap
       if now - self._config_t >= CONFIG_REFRESH_S:
         self._config_t, self.config = now, load_config(self.config_path)
@@ -174,5 +175,5 @@ class NavExit:
       return v_target, a_target
     if cap is None or cap[0] >= v_target:
       return v_target, a_target
-    self.phase = cap[2]
+    self.phase, self.decel = cap[2], cap[1]
     return cap[0], min(a_target, -cap[1])

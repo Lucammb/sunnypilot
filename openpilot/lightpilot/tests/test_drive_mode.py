@@ -185,6 +185,15 @@ class TestDriveMode(Files):
     self.assertIsNone(read_status(self.status, now=104.0))
     self.assertIsNone(read_status(self.status + ".missing", now=100.0))
 
+  def test_not_dropped_at_speed_while_the_model_is_slowing_the_car(self):
+    write_choice(STOCK, self.choice)
+    mode = self.mode()
+    self.route([{'kind': 'turn', 'start': -40.0, 'end': -25.0, 'modifier': 'right'}], now=100.0)  # the turn is 25 m behind
+    mode.e2e = True  # it was experimental through the turn
+    self.assertTrue(mode.update(11.0, True, -0.8, now=100.0))  # 40 km/h, the model brakes for something ahead: kept
+    self.assertEqual(mode.reason, 'hold')
+    self.assertFalse(mode.update(11.0, True, 0.4, now=100.1))  # it only accelerates less than the cruise would: stock
+
 
 class TestButtonLayout(unittest.TestCase):
   def test_top_right_without_route(self):

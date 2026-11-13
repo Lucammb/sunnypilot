@@ -20,11 +20,12 @@ from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import Lon
 J_CRUISE_VALS = [1.6, 1.2, 0.8, 0.6]
 J_CRUISE_BP = [0., 10.0, 25., 40.]
 A_CRUISE_MIN = -0.5
+LP_MAX_DECEL = 1.2  # lightpilot: the most a navigation cap can ask from the cruise plan
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
 
-def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, dt):
-  target_accel = np.clip(v_cruise - v_ego, A_CRUISE_MIN, ACCEL_MAX)
+def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, dt, a_min=A_CRUISE_MIN):
+  target_accel = np.clip(v_cruise - v_ego, a_min, ACCEL_MAX)
   j_cruise = np.interp(v_ego, J_CRUISE_BP, J_CRUISE_VALS)
   target_accel = float(np.clip(target_accel, a_cruise_prev - j_cruise * dt, a_cruise_prev + j_cruise * dt))
 
@@ -106,7 +107,8 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
-    self.a_cruise = get_cruise_accel(v_cruise, v_ego, self.a_cruise, self.dt)
+    # lightpilot: a navigation cap (exit ramp) may need to slow down faster than the cruise's own 0.5 m/s^2
+    self.a_cruise = get_cruise_accel(v_cruise, v_ego, self.a_cruise, self.dt, min(A_CRUISE_MIN, -min(self.lp_decel, LP_MAX_DECEL)))
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
     output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, self.a_cruise)
@@ -115,7 +117,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
                   (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop)]
     # lightpilot: the model's own plan takes part only in experimental driving (the driver's choice, automatic on a route)
     e2e_braking = bool(output_should_stop_e2e) or output_a_target_e2e < min(output_a_target_mpc, self.a_cruise)
-    if self.lp_drive_mode.update(v_ego, e2e_braking):
+    if self.lp_drive_mode.update(v_ego, e2e_braking, output_a_target_e2e):
       candidates.append((output_a_target_e2e, LongitudinalPlanSource.e2e, output_should_stop_e2e))
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])

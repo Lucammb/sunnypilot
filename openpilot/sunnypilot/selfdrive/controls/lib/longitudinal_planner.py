@@ -10,7 +10,7 @@ from opendbc.car import structs
 from openpilot.common.constants import CV
 from openpilot.lightpilot.drive_mode import DriveMode
 from openpilot.lightpilot.nav_exit import NavExit
-from openpilot.lightpilot.speed_cap import NavSpeedCap
+from openpilot.lightpilot.speed_cap import NavSpeedCap, Resume
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
@@ -39,6 +39,8 @@ class LongitudinalPlannerSP:
     self.lp_nav_cap = NavSpeedCap()  # lightpilot: speed cap before roundabouts, turns and stop signs
     self.lp_nav_exit = NavExit()  # lightpilot: motorway exits (80 km/h on the lanes, ramp speed after the driver's blinker)
     self.lp_drive_mode = DriveMode()  # lightpilot: stock or experimental (the driver's choice, automatic on a route)
+    self.lp_resume = Resume()  # lightpilot: after a navigation cap the speed comes back gently
+    self.lp_decel = 0.0  # lightpilot: deceleration the active navigation cap needs (0: none active)
 
     self.output_v_target = 0.
     self.output_a_target = 0.
@@ -73,9 +75,12 @@ class LongitudinalPlannerSP:
     self.output_v_target, self.output_a_target = targets[self.source]
 
     # lightpilot: navigation speed cap. It can only lower the target; the driver's gas pedal overrides it as for any target.
+    v_free = self.output_v_target
     self.output_v_target, self.output_a_target = self.lp_nav_cap.update(CS.vEgo, self.output_v_target, self.output_a_target)
     self.output_v_target, self.output_a_target = self.lp_nav_exit.update(CS.vEgo, self.output_v_target, self.output_a_target,
                                                                          CS.leftBlinker, CS.rightBlinker)
+    self.lp_decel = self.lp_nav_exit.decel or self.lp_nav_cap.decel  # the exit cap is applied last: when active it is the lower one
+    self.output_v_target = self.lp_resume.update(CS.vEgo, v_free, self.output_v_target, self.lp_nav_cap.config['resume_accel'])
     return self.output_v_target, self.output_a_target
 
   def update(self, sm: messaging.SubMaster) -> None:

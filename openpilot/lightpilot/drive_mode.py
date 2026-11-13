@@ -40,6 +40,7 @@ DEFAULTS = {'auto_in_navigation': True, 'ahead_s': 12.0, 'min_ahead_m': 150.0}
 AUTO_KINDS = ('roundabout', 'turn', 'stop', 'signal')
 RELEASE_M = 15.0  # stay experimental this far past the end of the zone
 HOLD_BELOW_MS = 8.0  # never drop the model's plan by itself below this speed while that plan is the one braking
+HOLD_DECEL = 0.3  # nor at any speed while the model is really slowing the car down (m/s^2): something is ahead
 REFRESH_S = 0.5  # how often the choice file is read and the status file written
 CONFIG_REFRESH_S = 5.0
 MIN_AHEAD_S, MAX_AHEAD_S = 5.0, 30.0
@@ -180,18 +181,19 @@ class DriveMode:
     kind = zone_ahead(data[0], v_ego, data[1], self.config)
     return kind is not None, True, kind, False
 
-  def update(self, v_ego: float, e2e_braking: bool, now: float | None = None) -> bool:
+  def update(self, v_ego: float, e2e_braking: bool, e2e_accel: float = 0.0, now: float | None = None) -> bool:
     """Whether the model's plan takes part in this cycle.
 
-    e2e_braking: the model's plan is the one asking for the lowest acceleration, or for a stop."""
+    e2e_braking: the model's plan is the one asking for the lowest acceleration, or for a stop; e2e_accel: what it asks."""
     now = time.monotonic() if now is None else now
     try:  # the planner must never fail because of this: on any problem, behave like the base software
       want, auto, reason, chosen = self._decide(v_ego, now)
     except Exception:
       want, auto, reason, chosen = True, False, None, False
     # Leaving experimental by itself (zone passed, route lost) while the model is holding the car at a red light would
-    # make it drive off: wait until the car is moving or the model no longer brakes. A tap by the driver is immediate.
-    if self.e2e and not want and not chosen and e2e_braking and v_ego < HOLD_BELOW_MS:
+    # make it drive off, and while it is slowing for something past a turn would make it speed up towards it: wait until
+    # the model no longer brakes. A tap by the driver is immediate.
+    if self.e2e and not want and not chosen and e2e_braking and (v_ego < HOLD_BELOW_MS or e2e_accel < -HOLD_DECEL):
       want, reason = True, 'hold'
     changed = (want, auto, reason) != (self.e2e, self.auto, self.reason)
     self.e2e, self.auto, self.reason = want, auto, reason

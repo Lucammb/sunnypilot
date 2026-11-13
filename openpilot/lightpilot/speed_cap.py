@@ -6,8 +6,10 @@ sqrt(v_target^2 + 2 * decel * max(d - offset, 0)), so the car starts slowing exa
 through the zone and released a few meters after it.
 
 Settings live in /data/lightpilot/config.json (optional), so no params keys are involved:
-  {"nav_speed_cap": {"enabled": true, "roundabout_kph": 30, "turn_kph": 30, "stop_kph": 25, "signal_kph": 0, "decel": 0.45}}
-A speed of 0 turns that kind of zone off. Takes effect within a few seconds, no restart.
+  {"nav_speed_cap": {"enabled": true, "roundabout_kph": 30, "turn_kph": 30, "slight_turn_kph": 50, "stop_kph": 25, "signal_kph": 0,
+                     "decel": 0.45, "resume_accel": 1.0}}
+A speed of 0 turns that kind of zone off. slight_turn_kph is for "bear left/right" turns. resume_accel (m/s^2) is how fast
+the target speed comes back after any navigation cap (roundabout, turn, exit). Takes effect within a few seconds, no restart.
 """
 import json
 import math
@@ -21,13 +23,22 @@ from openpilot.lightpilot.route_zones import HOLD_AGE_S, read_zones
 
 CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
 CONFIG_REFRESH_S = 5.0
-DEFAULTS = {'enabled': True, 'roundabout_kph': 30.0, 'turn_kph': 30.0, 'stop_kph': 25.0, 'signal_kph': 0.0, 'decel': 0.45}
+DEFAULTS = {'enabled': True, 'roundabout_kph': 30.0, 'turn_kph': 30.0, 'slight_turn_kph': 50.0, 'stop_kph': 25.0, 'signal_kph': 0.0, 'decel': 0.45,
+            'resume_accel': 1.0}
 KIND_KEYS = {'roundabout': 'roundabout_kph', 'turn': 'turn_kph', 'stop': 'stop_kph', 'signal': 'signal_kph'}  # 'exit' never caps
 BRAKING_OFFSET_M = 8.0  # the target speed is reached this far before the zone (stops)
 REACH_EARLY_M = 40.0  # roundabouts and turns: already at the target this far before, so the turn assist can act
 EARLY_KINDS = ('roundabout', 'turn')
 RELEASE_M = 5.0  # hold the cap this far past the end of the zone
 MIN_DECEL, MAX_DECEL = 0.2, 1.0  # a config typo must not make the car brake hard or not at all
+MIN_RESUME, MAX_RESUME = 0.5, 2.0  # m/s^2; 2.0 is what the base software does
+
+
+def zone_key(zone: dict) -> str | None:
+  """The config key with the speed for this zone."""
+  if zone['kind'] == 'turn' and 'slight' in str(zone.get('modifier') or ''):
+    return 'slight_turn_kph'
+  return KIND_KEYS.get(zone['kind'])
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -44,6 +55,7 @@ def load_config(path: Path | None = None) -> dict:
   except (OSError, ValueError, AttributeError):
     pass
   config['decel'] = min(max(float(config['decel']), MIN_DECEL), MAX_DECEL)
+  config['resume_accel'] = min(max(float(config['resume_accel']), MIN_RESUME), MAX_RESUME)
   return config
 
 
@@ -56,7 +68,7 @@ def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tu
   """(speed cap in m/s, kind of the zone that sets it), or None when no zone limits the speed."""
   best = None
   for zone in zones:
-    key = KIND_KEYS.get(zone['kind'])
+    key = zone_key(zone)
     target = float(config.get(key, 0.0)) * CV.KPH_TO_MS if key else 0.0
     if target <= 0.0:
       continue
@@ -77,6 +89,29 @@ def apply_cap(v_target: float, a_target: float, cap: tuple[float, str] | None, d
   return cap[0], min(a_target, -decel)
 
 
+class Resume:
+  """After a navigation cap ends, the target speed comes back at a comfortable rate, not at full acceleration."""
+
+  def __init__(self):
+    self.v: float | None = None
+    self.t = 0.0
+
+  def update(self, v_ego: float, v_target: float, v_capped: float, accel: float, now: float | None = None) -> float:
+    """v_target: without the caps; v_capped: with them. Returns the target speed to drive to."""
+    now = time.monotonic() if now is None else now
+    if v_capped < v_target:  # a cap is at work: remember where the resume starts from
+      self.v, self.t = v_capped, now
+      return v_capped
+    if self.v is None:
+      return v_target
+    dt, self.t = min(max(now - self.t, 0.0), 0.5), now
+    self.v = max(self.v + accel * dt, v_ego)  # never below the car's own speed: the driver's gas pedal is not fought
+    if self.v >= v_target:
+      self.v = None
+      return v_target
+    return self.v
+
+
 class NavSpeedCap:
   def __init__(self, config_path: Path | None = None, zones_path: str | None = None):
     self.config_path = config_path
@@ -84,12 +119,13 @@ class NavSpeedCap:
     self.config = load_config(config_path)
     self.config_time = time.monotonic()
     self.kind: str | None = None
+    self.decel = 0.0  # the deceleration this cap asks for while it is the one lowering the speed, else 0
 
   def update(self, v_ego: float, v_target: float, a_target: float) -> tuple[float, float]:
     """Apply the cap to (v_target, a_target)."""
     if time.monotonic() - self.config_time > CONFIG_REFRESH_S:
       self.config, self.config_time = load_config(self.config_path), time.monotonic()
-    self.kind = None
+    self.kind, self.decel = None, 0.0
     if not self.config['enabled']:
       return v_target, a_target
     try:  # the planner must never fail because of the cap: on any problem, no cap
@@ -102,5 +138,5 @@ class NavSpeedCap:
       cloudlog.exception("lightpilot: speed cap failed")
       return v_target, a_target
     if cap is not None and v_new < v_target:
-      self.kind = cap[1]
+      self.kind, self.decel = cap[1], self.config['decel']
     return v_new, a_new

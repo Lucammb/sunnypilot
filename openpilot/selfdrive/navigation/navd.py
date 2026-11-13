@@ -15,6 +15,7 @@ from openpilot.selfdrive.navigation.route import along_path, local_meters
 REROUTE_DISTANCE = 25
 MANEUVER_TRANSITION_THRESHOLD = 10
 REROUTE_COUNTER_MIN = 3
+OFF_ROUTE_NOW = 50  # lightpilot: this far from the route, or REROUTE_DISTANCE away twice in a row: the zones ahead are not this road's
 ROUTE_RESEND_PERIOD = 10  # updates (seconds); a restarted mapsd gets the route within this
 RECOMPUTE_HOLD = 10  # updates (seconds) between route requests
 
@@ -70,6 +71,8 @@ class RouteEngine:
 
     self.lp_zones: list[dict] = []  # lightpilot: roundabouts, turns, stop signs... along the route
     self.lp_step_starts: list[float] = []
+    self.lp_fix_time: float | None = None  # when the position was measured: the zones' distances are true at that moment
+    self.lp_off_route = 0
 
     self.mapbox_token = load_mapbox_token()  # lightpilot: $MAPBOX_TOKEN or /data/lightpilot/mapbox_token
     self.api = Api(self.params.get("DongleId")) if self.mapbox_token is None else None
@@ -82,6 +85,7 @@ class RouteEngine:
     if source is not None:
       gps = self.sm[source]
       self.last_position, self.last_bearing = (gps.longitude, gps.latitude), gps.bearingDeg
+      self.lp_fix_time = self.sm.recv_time[source]
     route = self.route
     try:
       self.recompute_route(gps_ok=source is not None)
@@ -175,7 +179,7 @@ class RouteEngine:
 
     assert self.route is not None and self.route_geometry is not None and self.last_position is not None
     step = self.route[self.step_idx]
-    along_geometry, _ = along_path(self.route_geometry[self.step_idx], self.last_position)
+    along_geometry, off_route = along_path(self.route_geometry[self.step_idx], self.last_position)
     distance_to_maneuver_along_geometry = step['distance'] - along_geometry
 
     # Banner instructions are for the following maneuver step, don't use empty last step
@@ -194,7 +198,7 @@ class RouteEngine:
     msg.navInstruction.timeRemaining = step['duration'] * remaining + sum(s['duration'] for s in future)
 
     self.pm.send('navInstruction', msg)
-    self.write_lightpilot_zones(along_geometry)
+    self.write_lightpilot_zones(along_geometry, off_route)
 
     # Transition to next route segment
     if distance_to_maneuver_along_geometry < -MANEUVER_TRANSITION_THRESHOLD:
@@ -221,6 +225,7 @@ class RouteEngine:
     self.step_idx = None
     self.nav_destination = None
     self.lp_zones, self.lp_step_starts = [], []
+    self.lp_off_route = 0
 
   def update_lightpilot_route(self):
     """lightpilot: find the zones (roundabouts, turns, stop signs) on a new route. Must never break navd."""
@@ -231,11 +236,19 @@ class RouteEngine:
       cloudlog.exception("lightpilot: failed to extract route zones")
       self.lp_zones, self.lp_step_starts = [], []
 
-  def write_lightpilot_zones(self, along_geometry: float):
-    """lightpilot: publish the zones ahead of the car, as distances, for the longitudinal planner."""
+  def write_lightpilot_zones(self, along_geometry: float, off_route: float = 0.0):
+    """lightpilot: publish the zones ahead of the car, as distances, for the longitudinal planner.
+
+    The file carries the time of the GPS fix, not of the writing: the readers move the distances by speed * age, so a
+    late or lost fix (tunnel, underpass) is accounted for, and after a few seconds without one the data expires by itself.
+    Away from the route (wrong turn, until the new route arrives) there is no data: its zones belong to another road."""
     try:
+      self.lp_off_route = self.lp_off_route + 1 if off_route > REROUTE_DISTANCE else 0
+      if off_route > OFF_ROUTE_NOW or self.lp_off_route >= 2:
+        route_zones.write_zones([], route=False)
+        return
       progress = self.lp_step_starts[self.step_idx] + along_geometry
-      route_zones.write_zones(route_zones.zones_ahead(self.lp_zones, progress))
+      route_zones.write_zones(route_zones.zones_ahead(self.lp_zones, progress), now=self.lp_fix_time)
     except Exception:
       cloudlog.exception("lightpilot: failed to write route zones")
 

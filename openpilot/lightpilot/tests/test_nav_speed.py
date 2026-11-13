@@ -1,6 +1,7 @@
 import json
 import math
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -9,7 +10,7 @@ import numpy as np
 
 from openpilot.common.constants import CV
 from openpilot.lightpilot import route_zones
-from openpilot.lightpilot.speed_cap import (BRAKING_OFFSET_M, DEFAULTS, NavSpeedCap, allowed_speed, apply_cap, compute_cap,
+from openpilot.lightpilot.speed_cap import (BRAKING_OFFSET_M, DEFAULTS, NavSpeedCap, Resume, allowed_speed, apply_cap, compute_cap,
                                             load_config)
 from openpilot.selfdrive.navigation.navd import RouteEngine
 
@@ -195,6 +196,42 @@ class TestCap(unittest.TestCase):
       self.assertEqual(cap.update(v_ego, 14.0, 0.1), (14.0, 0.1))  # disabled in the config
 
 
+class TestTurnsAndResume(unittest.TestCase):
+  def test_continue_left_is_a_turn_continue_slight_is_not(self):
+    def zones(maneuver):
+      steps = [straight_step(300, 0, maneuver={'type': 'depart'}), straight_step(200, 300, maneuver=maneuver)]
+      return route_zones.extract_zones(steps, [np.array(s['geometry']['coordinates'], dtype=np.float64) for s in steps])
+
+    self.assertEqual([z['kind'] for z in zones({'type': 'continue', 'modifier': 'left'})], ['turn'])
+    self.assertEqual(zones({'type': 'continue', 'modifier': 'slight left'}), [])
+    self.assertEqual(zones({'type': 'continue', 'modifier': 'straight'}), [])
+
+  def test_slight_turn_has_its_own_speed(self):
+    def cap(modifier, config=DEFAULTS):
+      return compute_cap([{'kind': 'turn', 'start': -1.0, 'end': 14.0, 'modifier': modifier}], config, 10.0, 0.0)
+
+    self.assertAlmostEqual(cap('right')[0], 30 * KPH)
+    self.assertAlmostEqual(cap('slight right')[0], 50 * KPH)
+    self.assertIsNone(cap('slight left', {**DEFAULTS, 'slight_turn_kph': 0.0}))
+
+  def test_speed_comes_back_gently_after_a_cap(self):
+    resume = Resume()
+    self.assertEqual(resume.update(14.0, 14.0, 14.0, 1.0, now=10.0), 14.0)  # never capped: nothing to do
+    self.assertEqual(resume.update(8.3, 14.0, 8.3, 1.0, now=20.0), 8.3)  # capped
+    self.assertAlmostEqual(resume.update(8.3, 14.0, 14.0, 1.0, now=20.05), 8.35)  # the cap is gone: +1 m/s every second
+    self.assertAlmostEqual(resume.update(8.4, 14.0, 14.0, 1.0, now=20.55), 8.85)
+    self.assertAlmostEqual(resume.update(12.0, 14.0, 14.0, 1.0, now=20.6), 12.0)  # the driver accelerates: follow the car
+    self.assertEqual(resume.update(12.0, 11.0, 11.0, 1.0, now=20.65), 11.0)  # the set speed was lowered below it: done
+    self.assertEqual(resume.update(11.0, 14.0, 14.0, 1.0, now=20.7), 14.0)
+
+  def test_config_limits_resume_accel(self):
+    with tempfile.TemporaryDirectory() as d:
+      path = Path(d) / 'config.json'
+      path.write_text(json.dumps({'nav_speed_cap': {'resume_accel': 9, 'slight_turn_kph': 40}}))
+      config = load_config(path)
+      self.assertEqual((config['resume_accel'], config['slight_turn_kph']), (2.0, 40.0))
+
+
 class TestNavdWritesZones(unittest.TestCase):
   def test_zones_follow_the_car(self):
     route, geometry = make_route()
@@ -215,6 +252,25 @@ class TestNavdWritesZones(unittest.TestCase):
       zones, _ = route_zones.read_zones()
       self.assertEqual(zones[0]['kind'], 'roundabout')
       self.assertAlmostEqual(zones[0]['start'], 50, delta=1.5)
+      # the file carries the time of the GPS fix: a fix that is 4 s old makes the readers move the zones on by speed * 4
+      engine.lp_fix_time = time.monotonic() - 4.0
+      engine.send_instruction()
+      self.assertIsNone(route_zones.read_zones())  # too old for the strict readers
+      _, age = route_zones.read_zones(max_age=route_zones.HOLD_AGE_S)
+      self.assertAlmostEqual(age, 4.0, delta=0.5)
+      engine.lp_fix_time = None
+      # away from the route (a wrong turn) its zones are another road's: no data, at once when far, after two fixes when near
+      engine.last_position = (350 * METER, 60 * METER)
+      engine.send_instruction()
+      self.assertIsNone(route_zones.read_zones())
+      engine.last_position = (350 * METER, 0)
+      engine.send_instruction()
+      self.assertIsNotNone(route_zones.read_zones())
+      engine.last_position = (350 * METER, 30 * METER)
+      engine.send_instruction()
+      self.assertIsNotNone(route_zones.read_zones())  # one fix 30 m away can be GPS noise
+      engine.send_instruction()
+      self.assertIsNone(route_zones.read_zones())
       engine.clear_route()
       engine.send_instruction()
       self.assertIsNone(route_zones.read_zones())  # no route: no data at all

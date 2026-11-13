@@ -21,6 +21,7 @@ HOLD_AGE_S = 15.0  # the planner's caps and driving mode keep using a file this 
 
 ROUNDABOUT_TYPES = ("roundabout", "rotary", "roundabout turn")
 TURN_TYPES = ("turn", "end of road")
+CONTINUE_TURNS = ("left", "right", "sharp left", "sharp right", "uturn")  # "continue left": the road itself turns at the junction
 EXIT_TYPES = ("off ramp", "fork")
 TURN_ZONE_M = 15.0  # length of the crossing at an intersection
 MAX_RAMP_M = 400.0  # the exit speed is held at most this far along the ramp
@@ -49,7 +50,7 @@ def extract_zones(route, route_geometry) -> list[dict]:
     mtype, modifier = maneuver.get('type'), maneuver.get('modifier', '')
     if mtype in ROUNDABOUT_TYPES:
       zones.append({'kind': 'roundabout', 'start': starts[i], 'end': starts[i] + min(step['distance'], MAX_ROUNDABOUT_M), 'exit': maneuver.get('exit')})
-    elif mtype in TURN_TYPES and modifier != 'straight':
+    elif (mtype in TURN_TYPES and modifier != 'straight') or (mtype == 'continue' and modifier in CONTINUE_TURNS):
       zones.append({'kind': 'turn', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier})
     elif mtype == 'off ramp':  # the zone is the ramp itself: the exit speed is held along it (nav_exit.py)
       zones.append({'kind': 'exit', 'start': starts[i], 'end': starts[i] + min(max(step['distance'], TURN_ZONE_M), MAX_RAMP_M), 'modifier': modifier,
