@@ -26,6 +26,28 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
 - Tetto di velocità prima di rotonde, svolte e stop (`speed_cap.py`); solo frena, il gas lo supera. Svolte leggere
   ("tieni la destra"): 50 km/h (`slight_turn_kph`). Dopo ogni tetto (rotonda, svolta, uscita) la velocità torna a
   1,0 m/s² (`resume_accel`), non a pieno gas. Fuori percorso o senza GPS da più di 15 s: nessun tetto.
+- **Velocità dalla forma della strada** (`route_info.py`, `"shape": true`): in rotonda dal raggio dell'anello
+  (`sqrt(lat_accel · raggio)`, tra 20 e 40 km/h; 30 fissi se la mappa non dà il raggio); nelle svolte dall'angolo
+  (20 km/h per un tornante, 26 a 90°, 45 per una svolta dolce); nelle **curve strette** del percorso (raggio sotto 120 m
+  e cambio di direzione di almeno 30°: da 20 km/h fino a `curve_kph` = 60). `lat_accel` = 2,3 m/s².
+- **Altri punti del percorso**: casello (`toll_kph` 30, non i portali free-flow), dare precedenza (`yield_kph` 30),
+  passaggio a livello (`rail_kph` 30): rallenta e passa in sperimentale. Immissione (`merge`) e coda: solo sperimentale.
+  Semafori, stop e precedenze sono posizionati dalle loro coordinate (prima finivano a fine tratto).
+- **Limite di velocità** (`speed_limit.py`): il cartello a schermo mostra il limite letto dalla Tesla e, quando manca,
+  quello della mappa di navigazione (navd chiede `maxspeed` a Mapbox; arriva anche al telefono). **Un tocco sul cartello**
+  fa del limite la velocità di marcia (anello verde, `MAX 50`): resta quel valore anche se il limite cambia; un nuovo
+  tocco prende il limite nuovo, un tocco sullo stesso limite lo spegne. **Dopo un'uscita di autostrada/tangenziale**
+  presa con la freccia il limite viene seguito da solo (anello blu, `AUTO 70`; 90 km/h finché non se ne conosce uno).
+  Cambiare la velocità impostata sull'auto spegne entrambi. Può solo abbassare: la velocità impostata resta quella
+  della Tesla, il software non può cambiarla; se il limite è più alto va alzata dalla levetta. Margine: quello delle
+  impostazioni sunnypilot del limite. `{"speed_limit": {"tap": true, "after_exit": true, "unknown_kph": 90}}`.
+- **Gallerie**: senza GPS dentro una galleria del percorso la posizione avanza con la velocità dell'auto fino a 200 m
+  dopo l'uscita, così uno svincolo o una rotonda subito dopo non vengono persi. Fuori dalle gallerie i dati scadono
+  dopo 15 s senza GPS.
+- **Code**: traffico intenso per almeno 200 m sul percorso (dato Mapbox, può avere qualche minuto): avviso `CODA TRA 800 m`
+  sul Konik e sul telefono, e sperimentale da prima della coda. Non frena da solo per questo.
+- **Diario di guida**: le ultime righe di `mode.log` (M) e `turn.log` (T) arrivano alla pagina del telefono
+  (sezione "Diario di guida"). Richiede `api.php` e `index.html` aggiornati sul server.
 - **Svolta automatica da navigazione** (`nav_turn.py`, spenta di default): a una svolta del percorso, senza freccia, sotto
   la velocità `LaneTurnValue` e con `LaneTurnDesire` attivo, il controller delle svolte (`lane_turn_desire.py`) riceve il
   lato dal percorso. La tua freccia ha sempre la precedenza; l'angolo cieco la blocca. Rotonde (opzionali): 1ª uscita =

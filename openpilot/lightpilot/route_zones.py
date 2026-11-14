@@ -12,8 +12,6 @@ import json
 import os
 import time
 
-import numpy as np
-
 from openpilot.lightpilot import route_info
 
 ZONES_PATH = os.environ.get("LIGHTPILOT_ZONES", "/dev/shm/lightpilot_zones.json")
@@ -140,4 +138,22 @@ def read_limit(path: str | None = None, now: float | None = None, max_age: float
       return None
     return float(limit) if 5 <= limit <= 150 else None
   except (OSError, ValueError, KeyError, TypeError):
+    return None
+
+
+def jam_ahead(zones: list[dict], v_ego: float, age: float) -> float | None:
+  """Meters to the queue ahead on the route (0: in it), or None."""
+  moved = v_ego * age
+  for zone in zones:
+    if zone['kind'] == 'jam' and zone['end'] - moved > 0:
+      return max(zone['start'] - moved, 0.0)
+  return None
+
+
+def read_jam(v_ego: float, path: str | None = None, now: float | None = None) -> float | None:
+  """jam_ahead() from the zones file; None on any problem (for the screen and the phone link)."""
+  try:
+    data = read_zones(path, now)
+    return None if data is None else jam_ahead(data[0], v_ego, data[1])
+  except Exception:
     return None

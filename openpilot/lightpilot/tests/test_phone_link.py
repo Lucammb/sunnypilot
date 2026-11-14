@@ -240,3 +240,43 @@ def test_route_is_sent_again_when_it_comes_back_or_the_server_lost_it(monkeypatc
   clock[0] += 10
   link.step()
   assert len(sent) == 3
+
+
+def test_diary_merges_the_logs_by_time(tmp_path):
+  from openpilot.lightpilot.phone_link import diary
+  mode, turn = tmp_path / 'mode.log', tmp_path / 'turn.log'
+  mode.write_text('10:00:01 experimental auto reason=slow\n10:00:09 stock auto\n\n10:00:20 experimental auto reason=roundabout\n')
+  turn.write_text('10:00:05 v=30km/h zone=roundabout:2\n')
+  files = ((str(mode), 'M'), (str(turn), 'T'), (str(tmp_path / 'missing.log'), 'X'))
+  assert diary(files) == ['M 10:00:01 experimental auto reason=slow', 'T 10:00:05 v=30km/h zone=roundabout:2', 'M 10:00:09 stock auto',
+                          'M 10:00:20 experimental auto reason=roundabout']
+  assert diary(files, max_lines=2) == ['M 10:00:09 stock auto', 'M 10:00:20 experimental auto reason=roundabout']
+  mode.write_text(''.join(f'11:{i // 60:02d}:{i % 60:02d} line {i} {"x" * 300}\n' for i in range(400)))  # long file, long lines
+  lines = diary(files)
+  assert 0 < len(lines) <= 80 and all(len(line) <= 202 for line in lines) and lines[-1].startswith('M 11:06:39 line 399')
+  assert not any('line 0 ' in line for line in lines)
+
+
+def test_diary_is_sent_only_when_it_changed():
+  r = Rig()
+  log = {'lines': ['M 10:00:01 a']}
+  r.link.live = lambda: {'pos': None, 'route_key': '', 'route_pts': None, 'log': list(log['lines'])}
+  r.link.step()
+  r.link.step()
+  log['lines'].append('M 10:00:05 b')
+  r.link.step()
+  assert [rep.get('log') for rep in r.reports] == [['M 10:00:01 a'], None, ['M 10:00:01 a', 'M 10:00:05 b']]
+
+
+def test_server_keeps_the_diary_and_the_queue(server):
+  phone, device = {'X-Token': 'P' + 'a' * 20}, {'X-Token': 'D' + 'b' * 20}
+  assert requests.get(server, params={'a': 'log'}, headers=phone).json() == {'at': 0, 'lines': []}
+  assert requests.get(server, params={'a': 'log'}, headers=device).status_code == 400  # the diary is for the phone
+  requests.post(server, params={'a': 'set'}, headers=phone, json=DEST)
+  requests.post(server, params={'a': 'sync'}, headers=device, json={'seq': 1, 'has_dest': True, 'remaining_m': 5000, 'jam_m': 820,
+                                                                    'log': ['M 10:00:01 perché', 7, 'x' * 500]})
+  got = requests.get(server, params={'a': 'log'}, headers=phone).json()
+  assert got['lines'] == ['M 10:00:01 perché', 'x' * 240] and got['at'] > 0
+  assert requests.get(server, params={'a': 'state'}, headers=phone).json()['route']['jam_m'] == 820
+  requests.post(server, params={'a': 'sync'}, headers=device, json={'seq': 1, 'has_dest': True, 'remaining_m': 4000})  # no diary this time
+  assert requests.get(server, params={'a': 'log'}, headers=phone).json()['lines'][0] == 'M 10:00:01 perché'  # kept

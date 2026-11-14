@@ -70,6 +70,12 @@ li small{display:block;color:var(--mute);font-weight:400}
     <ul id="recent"></ul>
   </section>
 
+  <section class="card">
+    <div class="row"><span class="mute">Diario di guida</span><button class="ghost" id="diaryBtn" style="padding:6px 12px">Mostra</button></div>
+    <div class="mute hide" id="diaryInfo" style="margin-top:8px"></div>
+    <pre id="diary" class="hide" style="margin:8px 0 0;max-height:60vh;overflow:auto;font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word"></pre>
+  </section>
+
   <section class="card hide" id="confirm">
     <div class="mute">Destinazione</div>
     <div class="dest" id="cname"></div>
@@ -262,9 +268,10 @@ async function renderNav(s) {
     $('barrow').innerHTML = '<polyline points="' + arrowPts(route.modifier || '').map(q => q.join(',')).join(' ') + '"/>';
     $('parr').textContent = clock(route.remaining_s || 0); $('pmin').textContent = fmtMin(route.remaining_s || 0); $('pkm').textContent = fmtKm(route.remaining_m || 0);
     drawLanes(route.lanes || []);
-    const adv = route.advice;
-    $('advice').classList.toggle('hide', !adv);
+    const adv = route.advice, jam = route.jam_m;
+    $('advice').classList.toggle('hide', !adv && jam == null);
     if (adv) $('advice').textContent = (adv.side === 'left' ? '← ' : '') + 'Prossima uscita · tieniti a ' + (adv.side === 'left' ? 'sinistra' : 'destra →');
+    else if (jam != null) $('advice').textContent = jam < 50 ? 'Coda' : 'Coda tra ' + fmtKm(jam);
   }
   const lim = route && route.limit_kmh, kmh = p ? Math.round(p.speed * 3.6) : 0;
   $('limit').classList.toggle('hide', !lim); $('limit').textContent = lim || '';
@@ -283,6 +290,25 @@ async function renderNav(s) {
   if (first) map.jumpTo(cam); else map.easeTo({ ...cam, duration: LIVE_MS, easing: t => t });
   const src = map.getSource('route'); if (src) src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: remainingRoute(lat, lon) } });
 }
+// The driving diary: what lightpilot decided and why (M: stock/experimental, T: turns), newest at the bottom.
+let diaryOpen = false, diaryTimer = null;
+async function loadDiary() {
+  clearTimeout(diaryTimer);
+  if (!diaryOpen) return;
+  try {
+    const d = await call('log'), pre = $('diary'), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+    pre.textContent = d.lines.length ? d.lines.join('\n') : '';
+    $('diaryInfo').textContent = d.lines.length ? 'Aggiornato alle ' + new Date(d.at * 1000).toLocaleTimeString('it-IT') : 'Ancora nessuna riga: arriva dopo il primo viaggio con un percorso.';
+    if (atEnd) pre.scrollTop = pre.scrollHeight;
+  } catch (e) { $('diaryInfo').textContent = 'Diario non disponibile (server da aggiornare?)'; }
+  diaryTimer = setTimeout(loadDiary, 10000);
+}
+$('diaryBtn').onclick = () => {
+  diaryOpen = !diaryOpen;
+  $('diaryBtn').textContent = diaryOpen ? 'Nascondi' : 'Mostra';
+  $('diary').classList.toggle('hide', !diaryOpen); $('diaryInfo').classList.toggle('hide', !diaryOpen);
+  loadDiary();
+};
 $('menu').onclick = () => { dismissed = true; setNav(false); };
 $('openMap').onclick = () => { dismissed = false; setNav(true); poll(); };
 

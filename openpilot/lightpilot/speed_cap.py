@@ -40,6 +40,7 @@ RING_KPH = (20.0, 40.0)  # a roundabout's speed from its radius stays within the
 MIN_SHAPE_KPH = 20.0
 TURN_ANGLES, TURN_KPH = (30.0, 60.0, 90.0, 120.0), (45.0, 32.0, 26.0, 20.0)  # degrees the road turns by -> km/h
 MIN_LAT_ACCEL, MAX_LAT_ACCEL = 1.5, 3.5
+KIND_DECEL = {'toll': 0.8}  # at least this deceleration: from motorway speed the usual one would start over a kilometer before
 BRAKING_OFFSET_M = 8.0  # the target speed is reached this far before the zone (stops)
 REACH_EARLY_M = 40.0  # roundabouts and turns: already at the target this far before, so the turn assist can act
 EARLY_KINDS = ('roundabout', 'turn', 'toll')
@@ -100,8 +101,8 @@ def allowed_speed(distance: float, target: float, decel: float, offset: float = 
   return math.sqrt(target * target + 2.0 * decel * max(distance - offset, 0.0))
 
 
-def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tuple[float, str] | None:
-  """(speed cap in m/s, kind of the zone that sets it), or None when no zone limits the speed."""
+def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tuple[float, str, float] | None:
+  """(speed cap in m/s, kind of the zone that sets it, its deceleration), or None when no zone limits the speed."""
   best = None
   for zone in zones:
     target = zone_target(zone, config)
@@ -111,13 +112,14 @@ def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tu
     if end < -RELEASE_M:
       continue
     offset = REACH_EARLY_M if zone['kind'] in EARLY_KINDS else BRAKING_OFFSET_M
-    cap = allowed_speed(start, target, config['decel'], offset) if start > 0.0 else target
+    decel = max(config['decel'], KIND_DECEL.get(zone['kind'], 0.0))
+    cap = allowed_speed(start, target, decel, offset) if start > 0.0 else target
     if best is None or cap < best[0]:
-      best = (cap, zone['kind'])
+      best = (cap, zone['kind'], decel)
   return best
 
 
-def apply_cap(v_target: float, a_target: float, cap: tuple[float, str] | None, decel: float) -> tuple[float, float]:
+def apply_cap(v_target: float, a_target: float, cap: tuple | None, decel: float) -> tuple[float, float]:
   """Lower (v_target, a_target) to the cap, never raise them."""
   if cap is None or cap[0] >= v_target:
     return v_target, a_target
@@ -168,10 +170,10 @@ class NavSpeedCap:
       if data is None:
         return v_target, a_target
       cap = compute_cap(data[0], self.config, v_ego, data[1])
-      v_new, a_new = apply_cap(v_target, a_target, cap, self.config['decel'])
+      v_new, a_new = apply_cap(v_target, a_target, cap, cap[2] if cap is not None else self.config['decel'])
     except Exception:
       cloudlog.exception("lightpilot: speed cap failed")
       return v_target, a_target
     if cap is not None and v_new < v_target:
-      self.kind, self.decel = cap[1], self.config['decel']
+      self.kind, self.decel = cap[1], cap[2]
     return v_new, a_new

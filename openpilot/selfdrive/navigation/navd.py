@@ -157,6 +157,9 @@ class RouteEngine:
     url = self.mapbox_host + '/directions/v5/mapbox/driving-traffic/' + coords_str
     try:
       resp = requests.get(url, params=params, timeout=10)
+      if resp.status_code == 422 and 'annotations' in params:  # lightpilot: never lose the route over the extras
+        cloudlog.warning("navd: annotations refused, asking for the route without them")
+        resp = requests.get(url, params={k: v for k, v in params.items() if k != 'annotations'}, timeout=10)
       if resp.status_code != 200:
         cloudlog.event("API request failed", status_code=resp.status_code, text=resp.text, error=True)
       resp.raise_for_status()

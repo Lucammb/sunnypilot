@@ -8,6 +8,7 @@ import pyray as rl
 from openpilot.common.constants import CV
 from openpilot.lightpilot.hud_layout import DRIVE_MODE_BADGE_PX, NAV_CARD_HEIGHT, NAV_CARD_MARGIN, NAV_CARD_WIDTH
 from openpilot.lightpilot.nav_exit import load_config as load_exit_config, read_advisory
+from openpilot.lightpilot.route_zones import read_jam
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import FontWeight, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets import Widget
@@ -65,6 +66,7 @@ class NavigationPanel(Widget):
     self._primary = UnifiedLabel('', 34, FontWeight.MEDIUM, rl.Color(200, 210, 218, 255), scroll=True)
     self._advice: dict | None = None
     self._advice_time = float('-inf')
+    self._jam: float | None = None  # meters to a queue on the route
     self._exit_config = load_exit_config()
 
   def _draw_exit_advice(self, rect):
@@ -73,7 +75,15 @@ class NavigationPanel(Widget):
     if now - self._advice_time >= ADVICE_REFRESH_S:
       self._advice_time = now
       self._advice = read_advisory(ui_state.sm['carState'].vEgo, self._exit_config)
+      self._jam = read_jam(ui_state.sm['carState'].vEgo)
     if self._advice is None:
+      if self._jam is not None:  # a queue ahead on the route: the same pill, no arrow
+        width = CARD_WIDTH - DRIVE_MODE_BADGE_PX - 16
+        pill = rl.Rectangle(rect.x + rect.width - CARD_WIDTH - CARD_MARGIN,
+                            rect.y + CARD_MARGIN + CARD_HEIGHT + 16 + (DRIVE_MODE_BADGE_PX - ADVICE_HEIGHT) / 2, width, ADVICE_HEIGHT)
+        rl.draw_rectangle_rounded(pill, 0.4, 12, ADVICE_COLOR)
+        text = 'CODA' if self._jam < 50 else f'CODA TRA {format_distance(self._jam)}'
+        gui_label(pill, text, 30, ADVICE_TEXT_COLOR, FontWeight.BOLD, alignment=TextAlignment.CENTER)
       return
     left = self._advice['side'] == 'left'
     width = CARD_WIDTH - DRIVE_MODE_BADGE_PX - 16

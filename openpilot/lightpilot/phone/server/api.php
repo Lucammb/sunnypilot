@@ -5,7 +5,9 @@
 //              GET ?a=cfg   -> {mapbox} (public pk. token for the map, kept here and not in the page)
 // device (X-Token = device_token): POST ?a=sync {seq,has_dest,arrived,remaining_m,remaining_s,next_m,text,modifier,street,
 //                                                  limit_kmh,lanes[{d:[dir..],a,ad}],advice{side,m},
-//                                                  pos{lat,lon,bearing,speed},route_key,route_pts[[lat,lon]..]} -> {seq,dest}
+//                                                  pos{lat,lon,bearing,speed},route_key,route_pts[[lat,lon]..],
+//                                                  jam_m,log[line..]} -> {seq,dest}
+// phone also:  GET ?a=log -> {at, lines} (the car's driving diary: what lightpilot decided and why)
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -18,6 +20,7 @@ if (!is_array($cfg) || strlen((string)($cfg['phone_token'] ?? '')) < 16 || strle
 $ttl = (int)($cfg['ttl_hours'] ?? 12) * 3600;
 $file = __DIR__ . '/data/state.json';
 $routeFile = __DIR__ . '/data/route.json';
+$logFile = __DIR__ . '/data/log.json';
 if (!is_dir(dirname($file))) { @mkdir(dirname($file), 0700, true); @file_put_contents(dirname($file) . '/.htaccess', "Require all denied\n"); }
 
 function respond(int $code, array $body): never { http_response_code($code); echo json_encode($body, JSON_UNESCAPED_UNICODE); exit; }
@@ -75,7 +78,7 @@ if ($role === 'phone' && $action === 'set') {
     $route = ['remaining_m' => num($body['remaining_m']), 'remaining_s' => num($body['remaining_s'] ?? null),
               'next_m' => num($body['next_m'] ?? null), 'text' => mb_substr((string)($body['text'] ?? ''), 0, 120),
               'modifier' => mb_substr((string)($body['modifier'] ?? ''), 0, 24), 'street' => mb_substr((string)($body['street'] ?? ''), 0, 120),
-              'limit_kmh' => num($body['limit_kmh'] ?? null), 'lanes' => lanes($body['lanes'] ?? null), 'advice' => advice($body['advice'] ?? null), 'at' => $now];
+              'limit_kmh' => num($body['limit_kmh'] ?? null), 'lanes' => lanes($body['lanes'] ?? null), 'advice' => advice($body['advice'] ?? null), 'jam_m' => num($body['jam_m'] ?? null), 'at' => $now];
   }
   $state['device']['route'] = $route;
   $pos = $body['pos'] ?? null;
@@ -91,6 +94,12 @@ if ($role === 'phone' && $action === 'set') {
     foreach ($pts as $p) { if (is_array($p) && count($p) === 2 && num($p[0]) !== null && num($p[1]) !== null) { $clean[] = [round((float)$p[0], 5), round((float)$p[1], 5)]; } }
     if (count($clean) >= 2) { file_put_contents($routeFile, json_encode(['key' => $key, 'pts' => $clean]), LOCK_EX); $state['device']['route_key'] = $key; }
   }
+  $log = $body['log'] ?? null;
+  if (is_array($log) && count($log) > 0) { // the car's driving diary: plain text lines, shown on the phone only
+    $lines = [];
+    foreach (array_slice($log, -120) as $l) { if (is_string($l)) { $lines[] = mb_substr($l, 0, 240); } }
+    file_put_contents($logFile, json_encode(['at' => $now, 'lines' => $lines], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), LOCK_EX);
+  }
   if (!empty($body['arrived']) && $state['dest'] !== null) {
     $state['seq']++; $state['dest'] = null; $state['status'] = 'arrived';
   } elseif ($state['dest'] !== null && !empty($body['has_dest']) && ($body['seq'] ?? null) === $state['seq']) {
@@ -101,6 +110,10 @@ if ($role === 'phone' && $action === 'set') {
   $r = is_file($routeFile) ? json_decode((string)file_get_contents($routeFile), true) : null;
   flock($fh, LOCK_UN); fclose($fh);
   respond(200, is_array($r) ? $r : ['key' => '', 'pts' => []]);
+} elseif ($role === 'phone' && $action === 'log') {
+  $l = is_file($logFile) ? json_decode((string)file_get_contents($logFile), true) : null;
+  flock($fh, LOCK_UN); fclose($fh);
+  respond(200, is_array($l) ? $l : ['at' => 0, 'lines' => []]);
 } elseif ($role === 'phone' && $action === 'cfg') {
   flock($fh, LOCK_UN); fclose($fh);
   $tok = (string)($cfg['mapbox_token'] ?? '');

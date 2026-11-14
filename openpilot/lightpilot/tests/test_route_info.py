@@ -144,7 +144,8 @@ class TestAnnotations(unittest.TestCase):
       out = []
       for a, _ in zip(coords, coords[1:], strict=False):
         x = a[0] / METER
-        out.append({'speed': 50, 'unit': 'km/h'} if x < 595 else {'unknown': True} if x < 895 else {'speed': 90, 'unit': 'km/h'} if x < 2495 else {'none': True})
+        kph = 50 if x < 595 else None if x < 895 else 90
+        out.append({'none': True} if x >= 2495 else {'unknown': True} if kph is None else {'speed': kph, 'unit': 'km/h'})
       return out
 
     limits = route_info.speed_limits(mapbox_route(self.steps, maxspeed=maxspeed))
@@ -223,6 +224,21 @@ class TestNavd(unittest.TestCase):
           engine.send_instruction()
       with patch('time.monotonic', return_value=start + 99):
         self.assertIsNone(route_zones.read_zones(max_age=route_zones.HOLD_AGE_S))
+
+  def test_route_still_comes_if_the_extras_are_refused(self):
+    steps = [step(line((0, 0), (3000, 0)), 'depart')]
+    refused, fine = MagicMock(status_code=422), MagicMock(status_code=200)
+    fine.json.return_value = {'routes': [{'legs': [{'steps': steps}]}]}
+    params = MagicMock()
+    params.get.side_effect = {'LanguageSetting': 'main_it'}.get
+    with patch('openpilot.selfdrive.navigation.navd.Api'), patch('openpilot.selfdrive.navigation.navd.load_mapbox_token', return_value='pk.x'), \
+         patch('requests.get', side_effect=[refused, fine]) as get:
+      engine = RouteEngine(MagicMock(), MagicMock(), params=params)
+      engine.last_position, engine.last_bearing = (0, 0), 90
+      engine.calculate_route((3000 * METER, 0))
+      self.assertEqual(len(engine.route), 1)
+      self.assertNotIn('annotations', get.call_args.kwargs['params'])
+      self.assertEqual(engine.lp_limits, [])
 
   def test_no_guessing_without_gps_outside_a_tunnel(self):
     steps = [step(line((0, 0), (3000, 0)), 'depart', intersections=[{'location': [2300 * METER, 0], 'stop_sign': True}])]

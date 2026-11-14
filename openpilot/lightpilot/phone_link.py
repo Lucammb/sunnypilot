@@ -30,6 +30,11 @@ RESEND_S = 8.0  # the route is not sent again sooner than this, whatever the ser
 IDLE_SECONDS = 30.0
 MAX_BACKOFF = 30.0
 ARRIVED_WITHIN_M = 250.0  # NavDestination vanishing with less than this left on the route means "arrived"
+DIARY_FILES = (('/data/lightpilot/mode.log', 'M'), ('/data/lightpilot/turn.log', 'T'))  # what the car decided, and why
+DIARY_LINES = 80
+DIARY_LINE_CHARS = 200
+DIARY_TAIL_BYTES = 16000
+DIARY_PERIOD_S = 10.0  # the diary is looked at, and sent when it changed, this often
 
 
 def load_config(path: str = CONFIG_PATH) -> dict | None:
@@ -61,6 +66,25 @@ def thin_route(coords: list[tuple[float, float]], spacing_m: float = ROUTE_POINT
   return [[round(la, 5), round(lo, 5)] for la, lo in kept]
 
 
+def diary(files: tuple[tuple[str, str], ...] = DIARY_FILES, max_lines: int = DIARY_LINES) -> list[str]:
+  """The last lines of lightpilot's logs, oldest first, each marked with its log (M: driving mode, T: turns).
+  The lines start with the time of day; within one day that orders them."""
+  lines: list[tuple[str, int, str]] = []
+  for path, mark in files:
+    try:
+      with open(path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - DIARY_TAIL_BYTES))
+        text = f.read().decode('utf-8', 'replace')
+    except OSError:
+      continue
+    rows = text.splitlines()[1 if size > DIARY_TAIL_BYTES else 0:]  # the first row of a cut file is half a line
+    lines += [(row[:8], i, f'{mark} {row[:DIARY_LINE_CHARS]}') for i, row in enumerate(rows) if row.strip()]
+  lines.sort(key=lambda entry: entry[0])  # stable: the order within a file is kept
+  return [text for _, _, text in lines[-max_lines:]]
+
+
 def route_key(coords: list[tuple[float, float]]) -> str:
   """Cheap identity of a route: changes when the route does."""
   if not coords:
@@ -85,6 +109,7 @@ class PhoneLink:
     self.applied_seq: int | None = None  # the server destination this process has put into the params
     self.was_present = False
     self.last_remaining = float('inf')
+    self.sent_log: list[str] | None = None  # the driving diary the server has
 
   def step(self) -> None:
     present = self.get_dest() is not None
@@ -111,6 +136,9 @@ class PhoneLink:
     if points and key != held and (key != self.sent_route_key or now - self.sent_at >= RESEND_S):
       report['route_pts'] = points  # only when the server lacks it: it is the big part of the message
       self.sent_at = now
+    log = live.get('log')
+    if log and log != self.sent_log:
+      report['log'] = log
     try:
       resp = self.sync(report)
     except requests.HTTPError as e:
@@ -120,6 +148,7 @@ class PhoneLink:
       report.pop('route_pts')
       resp = self.sync(report)
     self.sent_route_key = key if 'route_pts' in report else self.sent_route_key
+    self.sent_log = report.get('log', self.sent_log)
     seq, dest = resp.get('seq'), resp.get('dest')
     if 'route_key' in resp:
       self.server_route_key = str(resp['route_key'])
@@ -168,6 +197,7 @@ def main() -> None:  # pragma: no cover - needs the device
 
   params = Params()
   from openpilot.lightpilot.nav_exit import read_advisory
+  from openpilot.lightpilot.route_zones import read_jam
   sm = messaging.SubMaster(['navInstruction', 'navRoute', 'gpsLocation', 'gpsLocationExternal'])
 
   def get_dest():
@@ -182,7 +212,9 @@ def main() -> None:  # pragma: no cover - needs the device
     if sm.valid['navInstruction'] and sm.alive['navInstruction']:
       nav = sm['navInstruction']
       advice = read_advisory(0.0)  # the zones are at most a second old: close enough for a phone that polls every 2 s
+      jam = read_jam(0.0)
       return {'advice': None if advice is None else {'side': advice['side'], 'm': round(advice['distance'])},
+              'jam_m': None if jam is None else round(jam),
               'remaining_m': float(nav.distanceRemaining), 'remaining_s': float(nav.timeRemaining),
               'next_m': float(nav.maneuverDistance), 'text': nav.maneuverPrimaryText,
               'modifier': nav.maneuverModifier, 'street': nav.maneuverSecondaryText,
@@ -191,9 +223,14 @@ def main() -> None:  # pragma: no cover - needs the device
                         for lane in nav.lanes]}
     return {'remaining_m': None}
 
+  diary_state: dict = {'t': float('-inf'), 'lines': []}
+
   def live() -> dict:
     from openpilot.selfdrive.navigation.helpers import latest_gps_source
     out: dict = {'pos': None, 'route_key': '', 'route_pts': None}
+    if time.monotonic() - diary_state['t'] >= DIARY_PERIOD_S:
+      diary_state['t'], diary_state['lines'] = time.monotonic(), diary()
+    out['log'] = diary_state['lines']
     source = latest_gps_source(sm)
     if source is not None:
       gps = sm[source]
