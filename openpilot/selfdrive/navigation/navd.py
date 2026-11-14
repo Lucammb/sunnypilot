@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import time
+
 import numpy as np
 import requests
 
@@ -7,7 +9,7 @@ from openpilot.common.api import API_HOST, Api
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
-from openpilot.lightpilot import route_zones
+from openpilot.lightpilot import route_info, route_zones
 from openpilot.lightpilot.config import load_mapbox_token
 from openpilot.selfdrive.navigation.helpers import latest_gps_source
 from openpilot.selfdrive.navigation.route import along_path, local_meters
@@ -15,6 +17,7 @@ from openpilot.selfdrive.navigation.route import along_path, local_meters
 REROUTE_DISTANCE = 25
 MANEUVER_TRANSITION_THRESHOLD = 10
 REROUTE_COUNTER_MIN = 3
+TUNNEL_MARGIN = (150, 200)  # lightpilot: meters before and after a tunnel in which a lost GPS is still "the tunnel"
 OFF_ROUTE_NOW = 50  # lightpilot: this far from the route, or REROUTE_DISTANCE away twice in a row: the zones ahead are not this road's
 ROUTE_RESEND_PERIOD = 10  # updates (seconds); a restarted mapsd gets the route within this
 RECOMPUTE_HOLD = 10  # updates (seconds) between route requests
@@ -73,6 +76,12 @@ class RouteEngine:
     self.lp_step_starts: list[float] = []
     self.lp_fix_time: float | None = None  # when the position was measured: the zones' distances are true at that moment
     self.lp_off_route = 0
+    self.lp_mapbox_route: dict | None = None  # the whole route of the Directions response (speed limits, traffic)
+    self.lp_limits: list[tuple[float, float, float]] = []  # (start, end, km/h) along the route
+    self.lp_tunnels: list[tuple[float, float]] = []
+    self.lp_gps_ok = False
+    self.lp_progress: float | None = None  # meters along the route, and when that was true
+    self.lp_progress_time = 0.0
 
     self.mapbox_token = load_mapbox_token()  # lightpilot: $MAPBOX_TOKEN or /data/lightpilot/mapbox_token
     self.api = Api(self.params.get("DongleId")) if self.mapbox_token is None else None
@@ -86,6 +95,7 @@ class RouteEngine:
       gps = self.sm[source]
       self.last_position, self.last_bearing = (gps.longitude, gps.latitude), gps.bearingDeg
       self.lp_fix_time = self.sm.recv_time[source]
+    self.lp_gps_ok = source is not None
     route = self.route
     try:
       self.recompute_route(gps_ok=source is not None)
@@ -137,6 +147,7 @@ class RouteEngine:
       'banner_instructions': 'true',
       'alternatives': 'false',
       'roundabout_exits': 'true',  # lightpilot: the roundabout step ends at the exit, so it is the ring only
+      'annotations': 'maxspeed,congestion',  # lightpilot: speed limits and queues along the route
       'language': lang,
     }
     if self.last_bearing is not None:
@@ -156,6 +167,7 @@ class RouteEngine:
         self.route_geometry = [np.array(step['geometry']['coordinates'], dtype=np.float64).reshape((-1, 2)) for step in self.route]
         self.step_idx = 0
         self.nav_destination = destination
+        self.lp_mapbox_route = r['routes'][0]
         self.update_lightpilot_route()
       else:
         cloudlog.warning("Got empty route response")
@@ -197,6 +209,10 @@ class RouteEngine:
     msg.navInstruction.distanceRemaining = step['distance'] * remaining + sum(s['distance'] for s in future)
     msg.navInstruction.timeRemaining = step['duration'] * remaining + sum(s['duration'] for s in future)
 
+    limit = self.lightpilot_limit(along_geometry)
+    if limit is not None:
+      msg.navInstruction.speedLimit = limit / 3.6
+
     self.pm.send('navInstruction', msg)
     self.write_lightpilot_zones(along_geometry, off_route)
 
@@ -226,29 +242,58 @@ class RouteEngine:
     self.nav_destination = None
     self.lp_zones, self.lp_step_starts = [], []
     self.lp_off_route = 0
+    self.lp_mapbox_route, self.lp_limits, self.lp_tunnels, self.lp_progress = None, [], [], None
 
   def update_lightpilot_route(self):
-    """lightpilot: find the zones (roundabouts, turns, stop signs) on a new route. Must never break navd."""
+    """lightpilot: find the zones (roundabouts, turns, stop signs...), the speed limits and the tunnels on a new route.
+    Must never break navd."""
+    self.lp_limits, self.lp_tunnels, self.lp_progress = [], [], None
     try:
-      self.lp_zones = route_zones.extract_zones(self.route, self.route_geometry)
+      self.lp_zones = route_zones.extract_zones(self.route, self.route_geometry, self.lp_mapbox_route)
       self.lp_step_starts = route_zones.step_starts(self.route)
     except Exception:
       cloudlog.exception("lightpilot: failed to extract route zones")
       self.lp_zones, self.lp_step_starts = [], []
+      return
+    try:
+      self.lp_tunnels = route_info.tunnels(self.route, self.route_geometry, self.lp_step_starts)
+      if self.lp_mapbox_route is not None:
+        self.lp_limits = route_info.speed_limits(self.lp_mapbox_route)
+    except Exception:
+      cloudlog.exception("lightpilot: failed to read the route's limits and tunnels")
+
+  def lightpilot_limit(self, along_geometry: float) -> float | None:
+    """lightpilot: the map's speed limit (km/h) where the car is."""
+    try:
+      return route_info.limit_at(self.lp_limits, self.lp_step_starts[self.step_idx] + along_geometry)
+    except Exception:
+      return None
+
+  def lightpilot_in_tunnel(self, progress: float) -> bool:
+    return any(start - TUNNEL_MARGIN[0] <= progress <= end + TUNNEL_MARGIN[1] for start, end in self.lp_tunnels)
 
   def write_lightpilot_zones(self, along_geometry: float, off_route: float = 0.0):
     """lightpilot: publish the zones ahead of the car, as distances, for the longitudinal planner.
 
     The file carries the time of the GPS fix, not of the writing: the readers move the distances by speed * age, so a
-    late or lost fix (tunnel, underpass) is accounted for, and after a few seconds without one the data expires by itself.
+    late or lost fix (underpass) is accounted for, and after a few seconds without one the data expires by itself.
+    In a tunnel of the route the position goes on by the car's own speed for as long as the tunnel lasts, so that an exit
+    or a roundabout right after it is not missed.
     Away from the route (wrong turn, until the new route arrives) there is no data: its zones belong to another road."""
     try:
-      self.lp_off_route = self.lp_off_route + 1 if off_route > REROUTE_DISTANCE else 0
+      now = time.monotonic()
+      if self.lp_gps_ok or self.lp_progress is None:
+        self.lp_off_route = self.lp_off_route + 1 if off_route > REROUTE_DISTANCE else 0
+        self.lp_progress = self.lp_step_starts[self.step_idx] + along_geometry
+        self.lp_progress_time = now if self.lp_fix_time is None else self.lp_fix_time
+      elif self.lightpilot_in_tunnel(self.lp_progress):
+        self.lp_progress += max(float(self.sm['carState'].vEgo), 0.0) * min(max(now - self.lp_progress_time, 0.0), 30.0)
+        self.lp_progress_time = now
       if off_route > OFF_ROUTE_NOW or self.lp_off_route >= 2:
         route_zones.write_zones([], route=False)
         return
-      progress = self.lp_step_starts[self.step_idx] + along_geometry
-      route_zones.write_zones(route_zones.zones_ahead(self.lp_zones, progress), now=self.lp_fix_time)
+      route_zones.write_zones(route_zones.zones_ahead(self.lp_zones, self.lp_progress), now=self.lp_progress_time,
+                              limit_kph=route_info.limit_at(self.lp_limits, self.lp_progress))
     except Exception:
       cloudlog.exception("lightpilot: failed to write route zones")
 
@@ -271,7 +316,7 @@ class RouteEngine:
 
 def main():
   pm = messaging.PubMaster(['navInstruction', 'navRoute'])
-  sm = messaging.SubMaster(['gpsLocation', 'gpsLocationExternal'])
+  sm = messaging.SubMaster(['gpsLocation', 'gpsLocationExternal', 'carState'])  # lightpilot: carState for the speed in tunnels
 
   rk = Ratekeeper(1.0)
   route_engine = RouteEngine(sm, pm)

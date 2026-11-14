@@ -121,6 +121,9 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
   def _handle_mouse_press(self, mouse_pos):
     if ui_state.started and self._drive_mode_button.press(mouse_pos):  # lightpilot: a tap on the button is not for the sidebar
       return
+    sign = getattr(self._hud_renderer, 'speed_limit_renderer', None)  # lightpilot: a tap on the speed-limit sign
+    if ui_state.started and sign is not None and sign.press(mouse_pos):
+      return
     if self._click_callback is not None:
       self._click_callback()
 

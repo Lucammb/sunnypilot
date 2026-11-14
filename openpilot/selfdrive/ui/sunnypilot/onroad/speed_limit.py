@@ -11,6 +11,7 @@ import pyray as rl
 
 from openpilot.cereal import custom
 from openpilot.common.constants import CV
+from openpilot.lightpilot import speed_limit as lp_speed_limit
 from openpilot.lightpilot.hud_layout import speed_limit_sign_origin, speed_limit_sign_scale
 from openpilot.selfdrive.ui.onroad.hud_renderer import UI_CONFIG
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -40,6 +41,8 @@ class Colors:
   GREY = rl.Color(145, 155, 149, 255)
   DARK_GREY = rl.Color(77, 77, 77, 255)
   SUB_BG = rl.Color(0, 0, 0, 180)
+  HOLD_FIXED = rl.Color(72, 235, 132, 255)  # lightpilot: the limit is the speed driven to (tap)
+  HOLD_FOLLOW = rl.Color(80, 170, 255, 255)  # lightpilot: followed by itself after a motorway exit
   MUTCD_LINES = rl.Color(255, 255, 255, 100)
 
 
@@ -117,6 +120,11 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
 
+    # lightpilot: a tap on the sign makes the limit the speed to drive at (lightpilot/speed_limit.py)
+    self._sign_rect: rl.Rectangle | None = None
+    self._hold: dict | None = None
+    self._hold_time = float('-inf')
+
     self.font_bold = gui_app.font(FontWeight.BOLD)
     self.font_demi = gui_app.font(FontWeight.SEMI_BOLD)
     self.font_norm = gui_app.font(FontWeight.NORMAL)
@@ -191,12 +199,44 @@ class SpeedLimitRenderer(Widget, SpeedLimitAlertRenderer):
 
     alpha = self._pre_active_fade.alpha
 
+    self._sign_rect = None
     if ui_state.speed_limit_mode != SpeedLimitMode.off:
+      self._sign_rect = sign_rect
+      self._draw_hold(sign_rect)
       self._draw_sign_main(sign_rect, alpha)
       if self.speed_limit_assist_state == AssistState.preActive:
         self._draw_pre_active_arrow(sign_rect)
       else:
         self._draw_ahead_info(sign_rect)
+
+  def press(self, mouse_pos) -> bool:
+    """lightpilot: a tap on the sign. True if it was on the sign (and so not for the sidebar)."""
+    rect = self._sign_rect
+    if rect is None or not ui_state.has_longitudinal_control:
+      return False
+    pad = 30  # a finger is not a mouse
+    if not (rect.x - pad <= mouse_pos.x <= rect.x + rect.width + pad and rect.y - pad <= mouse_pos.y <= rect.y + rect.height + pad):
+      return False
+    lp_speed_limit.write_tap()
+    self._hold_time = float('-inf')  # show the result at once
+    return True
+
+  def _draw_hold(self, rect):
+    """lightpilot: a coloured ring around the sign and the speed under it while the limit is the speed driven to."""
+    now = rl.get_time()
+    if now - self._hold_time >= 0.25:
+      self._hold_time, self._hold = now, lp_speed_limit.read_status()
+    if self._hold is None:
+      return
+    k = getattr(self, "_scale", 1.0)
+    color = Colors.HOLD_FOLLOW if self._hold['mode'] == lp_speed_limit.FOLLOW else Colors.HOLD_FIXED
+    center = rl.Vector2(rect.x + rect.width / 2, rect.y + rect.height / 2)
+    radius = (rect.width + 18 * k) / 2
+    rl.draw_ring(center, radius + 4 * k, radius + 16 * k, 0, 360, 48, color)
+    kph = self._hold['kph']
+    value = round(kph if ui_state.is_metric else kph * KM_TO_MILE)
+    label = f"{'AUTO' if self._hold['mode'] == lp_speed_limit.FOLLOW else 'MAX'} {value}"
+    self._draw_text_centered(self.font_bold, label, int(38 * k), rl.Vector2(center.x, rect.y + rect.height + 44 * k), color)
 
   def _draw_sign_main(self, rect, alpha=1.0):
     speed_limit_warning_enabled = ui_state.speed_limit_mode is not None and ui_state.speed_limit_mode >= SpeedLimitMode.warning

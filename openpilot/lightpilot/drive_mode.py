@@ -7,7 +7,8 @@ compete with the cruise and lead-car plans. Here that is a choice again:
   too), with the button at the top right of the road view. The choice is kept in /data/lightpilot/drive_mode.
 - with a navigation route, it is automatic: experimental below 60 km/h (town driving: traffic lights and roundabouts
   the map may not know) and, at any speed, from shortly before a roundabout, a turn, a stop sign or a traffic signal on
-  the route until just past it; stock everywhere else (fast roads).
+  the route until just past it (and a yield sign, a toll booth, a level crossing, a merge, a queue); stock everywhere
+  else (fast roads).
 
 The planner asks DriveMode.update() every cycle whether the model's plan takes part, and writes what it decided to a
 small file in /dev/shm that the UI reads. No cereal or params-key changes are needed.
@@ -39,7 +40,7 @@ STATUS_PATH = os.environ.get("LIGHTPILOT_DRIVE_MODE", "/dev/shm/lightpilot_drive
 STATUS_MAX_AGE_S = 3.0  # a status older than this is ignored by the UI: the planner is not running
 
 DEFAULTS = {'auto_in_navigation': True, 'slow_kph': 60.0, 'ahead_s': 12.0, 'min_ahead_m': 150.0}
-AUTO_KINDS = ('roundabout', 'turn', 'stop', 'signal')
+AUTO_KINDS = ('roundabout', 'turn', 'stop', 'signal', 'yield', 'toll', 'rail', 'merge', 'jam')
 RELEASE_M = 15.0  # stay experimental this far past the end of the zone
 HOLD_BELOW_MS = 8.0  # never drop the model's plan by itself below this speed while that plan is the one braking
 HOLD_DECEL = 0.3  # nor at any speed while the model is really slowing the car down (m/s^2): something is ahead

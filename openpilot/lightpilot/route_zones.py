@@ -1,4 +1,5 @@
-"""Driving zones ahead on the Mapbox route (roundabouts, turns, exits, stop signs, traffic signals).
+"""Driving zones ahead on the Mapbox route (roundabouts, turns, exits, stop and yield signs, traffic signals, toll booths,
+level crossings, merges, tight curves, queues).
 
 navd extracts the zones from the route and, once a second, writes the ones ahead of the car, as distances, to a small
 JSON file in /dev/shm. The longitudinal planner reads it. No cereal or params-key changes are needed.
@@ -13,7 +14,7 @@ import time
 
 import numpy as np
 
-from openpilot.selfdrive.navigation.route import cumulative_distance
+from openpilot.lightpilot import route_info
 
 ZONES_PATH = os.environ.get("LIGHTPILOT_ZONES", "/dev/shm/lightpilot_zones.json")
 MAX_AGE_S = 3.0  # a zones file older than this is ignored: navd is gone or the route is lost
@@ -27,6 +28,11 @@ TURN_ZONE_M = 15.0  # length of the crossing at an intersection
 MAX_RAMP_M = 400.0  # the exit speed is held at most this far along the ramp
 MAX_ROUNDABOUT_M = 100.0  # a ring is never longer; a longer step is a route that did not end it at the exit
 POINT_ZONE_M = 10.0  # length around a stop sign or traffic signal
+MERGE_ZONE_M = 150.0  # joining a faster road: the stretch where the lanes come together
+SHAPE_CLEAR_M = 20.0  # a curve this close to a roundabout or a turn is that maneuver itself
+POINT_KINDS = (('signal', lambda n: n.get('traffic_signal')), ('stop', lambda n: n.get('stop_sign')), ('yield', lambda n: n.get('yield_sign')),
+               ('rail', lambda n: n.get('railway_crossing')),
+               ('toll', lambda n: (n.get('toll_collection') or {}).get('type') == 'toll_booth'))  # a gantry is driven through
 LOOKAHEAD_M = 1500.0
 PASSED_M = 20.0  # keep a zone this long after its end, so that the consumer sees it finish
 MAX_ZONES = 8
@@ -41,34 +47,47 @@ def step_starts(route) -> list[float]:
   return starts
 
 
-def extract_zones(route, route_geometry) -> list[dict]:
-  """All zones on the route, with start/end as distances along the route (m), sorted by start."""
+def extract_zones(route, route_geometry, mapbox_route: dict | None = None) -> list[dict]:
+  """All zones on the route, with start/end as distances along the route (m), sorted by start.
+
+  mapbox_route: the whole route of the Directions response, for what is not in the steps (traffic)."""
   starts = step_starts(route)
   zones = []
   for i, step in enumerate(route):
     maneuver = step.get('maneuver', {})
     mtype, modifier = maneuver.get('type'), maneuver.get('modifier', '')
     if mtype in ROUNDABOUT_TYPES:
-      zones.append({'kind': 'roundabout', 'start': starts[i], 'end': starts[i] + min(step['distance'], MAX_ROUNDABOUT_M), 'exit': maneuver.get('exit')})
+      zone = {'kind': 'roundabout', 'start': starts[i], 'end': starts[i] + min(step['distance'], MAX_ROUNDABOUT_M), 'exit': maneuver.get('exit')}
+      radius = route_info.ring_radius(route_geometry[i])
+      zones.append(zone if radius is None else {**zone, 'radius': radius})
     elif (mtype in TURN_TYPES and modifier != 'straight') or (mtype == 'continue' and modifier in CONTINUE_TURNS):
-      zones.append({'kind': 'turn', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier})
+      zone = {'kind': 'turn', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier}
+      angle = route_info.turn_angle(maneuver)
+      zones.append(zone if angle is None else {**zone, 'angle': angle})
     elif mtype == 'off ramp':  # the zone is the ramp itself: the exit speed is held along it (nav_exit.py)
       zones.append({'kind': 'exit', 'start': starts[i], 'end': starts[i] + min(max(step['distance'], TURN_ZONE_M), MAX_RAMP_M), 'modifier': modifier,
                     'ramp': True})
     elif mtype in EXIT_TYPES:
       zones.append({'kind': 'exit', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier})
+    elif mtype == 'merge':
+      zones.append({'kind': 'merge', 'start': starts[i], 'end': starts[i] + min(step['distance'], MERGE_ZONE_M)})
 
-    along = None
     for intersection in step.get('intersections', []):
-      kind = 'signal' if intersection.get('traffic_signal') else 'stop' if intersection.get('stop_sign') else None
-      if kind is None:
+      kinds = [kind for kind, present in POINT_KINDS if present(intersection)]
+      if not kinds:
         continue
-      if along is None:
-        geometry = route_geometry[i]
-        along = cumulative_distance(geometry) if len(geometry) > 1 else np.zeros(1)
-        scale = step['distance'] / along[-1] if along[-1] > 0 else 1.0  # Mapbox's distance is the reference
-      offset = float(along[min(intersection.get('geometry_index', 0), len(along) - 1)]) * scale
-      zones.append({'kind': kind, 'start': starts[i] + offset - POINT_ZONE_M / 2, 'end': starts[i] + offset + POINT_ZONE_M / 2})
+      offset = route_info.locate(intersection, route_geometry[i], step['distance'])
+      if offset is None:
+        continue
+      for kind in kinds:
+        zones.append({'kind': kind, 'start': starts[i] + offset - POINT_ZONE_M / 2, 'end': starts[i] + offset + POINT_ZONE_M / 2})
+
+  maneuvers = [z for z in zones if z['kind'] in ('roundabout', 'turn')]
+  for curve in route_info.curve_zones(route_geometry, starts, [step['distance'] for step in route]):
+    if not any(curve['start'] <= z['end'] + SHAPE_CLEAR_M and curve['end'] >= z['start'] - SHAPE_CLEAR_M for z in maneuvers):
+      zones.append(curve)
+  if mapbox_route is not None:
+    zones += route_info.jam_zones(mapbox_route)
   return sorted(zones, key=lambda z: z['start'])
 
 
@@ -82,13 +101,14 @@ def zones_ahead(zones: list[dict], progress: float) -> list[dict]:
   return ahead[:MAX_ZONES]
 
 
-def write_zones(zones: list[dict], path: str | None = None, now: float | None = None, route: bool = True) -> None:
-  """route=False: navd is running but there is no route (the consumers then see no data at all)."""
+def write_zones(zones: list[dict], path: str | None = None, now: float | None = None, route: bool = True, limit_kph: float | None = None) -> None:
+  """route=False: navd is running but there is no route (the consumers then see no data at all).
+  limit_kph: the map's speed limit where the car is, when it is known."""
   path = path or ZONES_PATH
   tmp = path + ".tmp"
   try:
     with open(tmp, "w") as f:
-      json.dump({'t': time.monotonic() if now is None else now, 'zones': zones, 'route': route}, f)
+      json.dump({'t': time.monotonic() if now is None else now, 'zones': zones, 'route': route, 'limit': limit_kph}, f)
     os.replace(tmp, path)
   except OSError:
     pass
@@ -105,5 +125,19 @@ def read_zones(path: str | None = None, now: float | None = None, max_age: float
     if not 0 <= age <= max_age or data.get('route', True) is False:
       return None
     return list(data['zones']), age
+  except (OSError, ValueError, KeyError, TypeError):
+    return None
+
+
+def read_limit(path: str | None = None, now: float | None = None, max_age: float = MAX_AGE_S) -> float | None:
+  """The map's speed limit (km/h) where the car is, or None: unknown, no route, or the file is older than max_age."""
+  try:
+    with open(path or ZONES_PATH) as f:
+      data = json.load(f)
+    age = (time.monotonic() if now is None else now) - float(data['t'])
+    limit = data.get('limit')
+    if not 0 <= age <= max_age or data.get('route', True) is False or isinstance(limit, bool) or not isinstance(limit, (int, float)):
+      return None
+    return float(limit) if 5 <= limit <= 150 else None
   except (OSError, ValueError, KeyError, TypeError):
     return None

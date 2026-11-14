@@ -11,6 +11,7 @@ from openpilot.common.constants import CV
 from openpilot.lightpilot.drive_mode import DriveMode
 from openpilot.lightpilot.nav_exit import NavExit
 from openpilot.lightpilot.speed_cap import NavSpeedCap, Resume
+from openpilot.lightpilot.speed_limit import LimitHold
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
@@ -41,6 +42,8 @@ class LongitudinalPlannerSP:
     self.lp_drive_mode = DriveMode()  # lightpilot: stock or experimental (the driver's choice, automatic on a route)
     self.lp_resume = Resume()  # lightpilot: after a navigation cap the speed comes back gently
     self.lp_decel = 0.0  # lightpilot: deceleration the active navigation cap needs (0: none active)
+    self.lp_limit = LimitHold()  # lightpilot: the speed limit as target speed (tap on the sign, after a motorway exit)
+    self.lp_on_ramp = False
 
     self.output_v_target = 0.
     self.output_a_target = 0.
@@ -58,6 +61,12 @@ class LongitudinalPlannerSP:
 
     # Speed Limit Resolver
     self.resolver.update(v_ego, sm)
+    if not self.resolver.speed_limit_valid:  # lightpilot: the car reads no limit here: the navigation map's, if it has one
+      map_limit = self.lp_limit.map_speed_limit()
+      if map_limit > 0:
+        self.resolver.speed_limit = map_limit
+        self.resolver.speed_limit_offset = self.resolver._get_speed_limit_offset()
+        self.resolver.update_speed_limit_states()
 
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
@@ -80,6 +89,13 @@ class LongitudinalPlannerSP:
     self.output_v_target, self.output_a_target = self.lp_nav_exit.update(CS.vEgo, self.output_v_target, self.output_a_target,
                                                                          CS.leftBlinker, CS.rightBlinker)
     self.lp_decel = self.lp_nav_exit.decel or self.lp_nav_cap.decel  # the exit cap is applied last: when active it is the lower one
+    # lightpilot: the speed limit as the speed to drive at, on the driver's tap or after a motorway exit
+    on_ramp = self.lp_nav_exit.phase == 'ramp'
+    limit = self.resolver.speed_limit_final_last if has_speed_limit else 0.0
+    hold = self.lp_limit.update(CS.vCruise, limit, self.lp_on_ramp and not on_ramp, long_enabled)
+    self.lp_on_ramp = on_ramp
+    if hold is not None:
+      self.output_v_target = min(self.output_v_target, hold)
     self.output_v_target = self.lp_resume.update(CS.vEgo, v_free, self.output_v_target, self.lp_nav_cap.config['resume_accel'])
     return self.output_v_target, self.output_a_target
 

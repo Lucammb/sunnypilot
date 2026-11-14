@@ -30,7 +30,8 @@ def make_route():
     straight_step(400, 0, maneuver={'type': 'depart'}),
     straight_step(80, 400, maneuver={'type': 'roundabout', 'exit': 2}),
     straight_step(520, 480, maneuver={'type': 'exit roundabout'},
-                  intersections=[{'stop_sign': True, 'geometry_index': 1}, {'traffic_signal': True, 'geometry_index': 2}]),
+                  intersections=[{'stop_sign': True, 'geometry_index': 5, 'location': [740 * METER, 0]},
+                                 {'traffic_signal': True, 'geometry_index': 6, 'location': [1000 * METER, 0]}]),
     straight_step(200, 1000, maneuver={'type': 'turn', 'modifier': 'right'}),
     straight_step(100, 1200, maneuver={'type': 'off ramp', 'modifier': 'right'}),
   ]
@@ -244,6 +245,7 @@ class TestNavdWritesZones(unittest.TestCase):
          patch.object(route_zones, 'ZONES_PATH', str(Path(d) / 'zones.json')):
       engine = RouteEngine(MagicMock(), MagicMock(), params=params)
       engine.last_position, engine.last_bearing = (0, 0), 90
+      engine.lp_gps_ok = True
       with patch('requests.get', return_value=response):
         engine.calculate_route((1300 * METER, 0))
       self.assertEqual(len(engine.lp_zones), 5)

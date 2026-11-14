@@ -1,4 +1,5 @@
-"""Speed cap before roundabouts, turns and stop signs, from the navigation route.
+"""Speed cap before roundabouts, turns, tight curves, stop and yield signs, toll booths and level crossings, from the
+navigation route.
 
 The cap only ever lowers the target speed, never raises it, and the driver's gas pedal overrides it like any other
 target. It follows a comfortable deceleration profile: the speed allowed at a distance d from the zone is
@@ -7,14 +8,21 @@ through the zone and released a few meters after it.
 
 Settings live in /data/lightpilot/config.json (optional), so no params keys are involved:
   {"nav_speed_cap": {"enabled": true, "roundabout_kph": 30, "turn_kph": 30, "slight_turn_kph": 50, "stop_kph": 25, "signal_kph": 0,
+                     "yield_kph": 30, "toll_kph": 30, "rail_kph": 30, "curve_kph": 60, "shape": true, "lat_accel": 2.3,
                      "decel": 0.45, "resume_accel": 1.0}}
 A speed of 0 turns that kind of zone off. slight_turn_kph is for "bear left/right" turns. resume_accel (m/s^2) is how fast
 the target speed comes back after any navigation cap (roundabout, turn, exit). Takes effect within a few seconds, no restart.
+
+With "shape" on, the speed comes from the road's own shape when the map shows it: sqrt(lat_accel * radius) in a roundabout
+(20 to 40 km/h) and in a tight curve (20 km/h to curve_kph), and by the angle at a turn (20 km/h for a hairpin turn,
+45 for a gentle one). Without the shape, or with "shape" off, the fixed speeds above apply; curves are then not capped.
 """
 import json
 import math
 import time
 from pathlib import Path
+
+import numpy as np
 
 from openpilot.common.constants import CV
 from openpilot.common.swaglog import cloudlog
@@ -23,12 +31,18 @@ from openpilot.lightpilot.route_zones import HOLD_AGE_S, read_zones
 
 CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
 CONFIG_REFRESH_S = 5.0
-DEFAULTS = {'enabled': True, 'roundabout_kph': 30.0, 'turn_kph': 30.0, 'slight_turn_kph': 50.0, 'stop_kph': 25.0, 'signal_kph': 0.0, 'decel': 0.45,
+DEFAULTS = {'enabled': True, 'roundabout_kph': 30.0, 'turn_kph': 30.0, 'slight_turn_kph': 50.0, 'stop_kph': 25.0, 'signal_kph': 0.0,
+            'yield_kph': 30.0, 'toll_kph': 30.0, 'rail_kph': 30.0, 'curve_kph': 60.0, 'shape': True, 'lat_accel': 2.3, 'decel': 0.45,
             'resume_accel': 1.0}
-KIND_KEYS = {'roundabout': 'roundabout_kph', 'turn': 'turn_kph', 'stop': 'stop_kph', 'signal': 'signal_kph'}  # 'exit' never caps
+KIND_KEYS = {'roundabout': 'roundabout_kph', 'turn': 'turn_kph', 'stop': 'stop_kph', 'signal': 'signal_kph', 'yield': 'yield_kph',
+             'toll': 'toll_kph', 'rail': 'rail_kph', 'curve': 'curve_kph'}  # 'exit', 'merge' and 'jam' never cap
+RING_KPH = (20.0, 40.0)  # a roundabout's speed from its radius stays within these
+MIN_SHAPE_KPH = 20.0
+TURN_ANGLES, TURN_KPH = (30.0, 60.0, 90.0, 120.0), (45.0, 32.0, 26.0, 20.0)  # degrees the road turns by -> km/h
+MIN_LAT_ACCEL, MAX_LAT_ACCEL = 1.5, 3.5
 BRAKING_OFFSET_M = 8.0  # the target speed is reached this far before the zone (stops)
 REACH_EARLY_M = 40.0  # roundabouts and turns: already at the target this far before, so the turn assist can act
-EARLY_KINDS = ('roundabout', 'turn')
+EARLY_KINDS = ('roundabout', 'turn', 'toll')
 RELEASE_M = 5.0  # hold the cap this far past the end of the zone
 MIN_DECEL, MAX_DECEL = 0.2, 1.0  # a config typo must not make the car brake hard or not at all
 MIN_RESUME, MAX_RESUME = 0.5, 2.0  # m/s^2; 2.0 is what the base software does
@@ -39,6 +53,27 @@ def zone_key(zone: dict) -> str | None:
   if zone['kind'] == 'turn' and 'slight' in str(zone.get('modifier') or ''):
     return 'slight_turn_kph'
   return KIND_KEYS.get(zone['kind'])
+
+
+def zone_target(zone: dict, config: dict) -> float:
+  """Speed (m/s) to drive this zone at; 0: this kind of zone does not cap."""
+  key = zone_key(zone)
+  fixed = float(config.get(key, 0.0)) if key else 0.0
+  if fixed <= 0.0:
+    return 0.0
+  kph, kind = fixed, zone['kind']
+  if config.get('shape', True):
+    radius, angle = zone.get('radius'), zone.get('angle')
+    by_radius = math.sqrt(config['lat_accel'] * radius) * CV.MS_TO_KPH if isinstance(radius, (int, float)) and radius > 0 else None
+    if kind == 'roundabout' and by_radius is not None:
+      kph = min(max(by_radius, RING_KPH[0]), RING_KPH[1])
+    elif kind == 'curve':
+      kph = min(max(by_radius, MIN_SHAPE_KPH), fixed) if by_radius is not None else 0.0
+    elif kind == 'turn' and isinstance(angle, (int, float)):
+      kph = float(np.interp(angle, TURN_ANGLES, TURN_KPH))
+  elif kind == 'curve':
+    kph = 0.0
+  return kph * CV.KPH_TO_MS
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -56,6 +91,7 @@ def load_config(path: Path | None = None) -> dict:
     pass
   config['decel'] = min(max(float(config['decel']), MIN_DECEL), MAX_DECEL)
   config['resume_accel'] = min(max(float(config['resume_accel']), MIN_RESUME), MAX_RESUME)
+  config['lat_accel'] = min(max(float(config['lat_accel']), MIN_LAT_ACCEL), MAX_LAT_ACCEL)
   return config
 
 
@@ -68,8 +104,7 @@ def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tu
   """(speed cap in m/s, kind of the zone that sets it), or None when no zone limits the speed."""
   best = None
   for zone in zones:
-    key = zone_key(zone)
-    target = float(config.get(key, 0.0)) * CV.KPH_TO_MS if key else 0.0
+    target = zone_target(zone, config)
     if target <= 0.0:
       continue
     start, end = zone['start'] - v_ego * age, zone['end'] - v_ego * age  # the file is up to a few seconds old
