@@ -56,8 +56,14 @@ def extract_zones(route, route_geometry, mapbox_route: dict | None = None) -> li
     mtype, modifier = maneuver.get('type'), maneuver.get('modifier', '')
     if mtype in ROUNDABOUT_TYPES:
       zone = {'kind': 'roundabout', 'start': starts[i], 'end': starts[i] + min(step['distance'], MAX_ROUNDABOUT_M), 'exit': maneuver.get('exit')}
-      radius = route_info.ring_radius(route_geometry[i])
-      zones.append(zone if radius is None else {**zone, 'radius': radius})
+      radius, run = route_info.ring_radius(route_geometry[i]), route_info.exit_run(step, route_geometry[i])
+      if modifier:
+        zone['modifier'] = modifier
+      if radius is not None:
+        zone['radius'] = radius
+      if run is not None:
+        zone['exit_run'] = run
+      zones.append(zone)
     elif (mtype in TURN_TYPES and modifier != 'straight') or (mtype == 'continue' and modifier in CONTINUE_TURNS):
       zone = {'kind': 'turn', 'start': starts[i], 'end': starts[i] + TURN_ZONE_M, 'modifier': modifier}
       angle = route_info.turn_angle(maneuver)

@@ -1,14 +1,21 @@
-"""Automatic turn desire from the navigation route (off by default).
+"""Turn desire from the navigation route: which way the driving model should steer where the route leaves the road ahead.
 
-At an intersection turn on the route, this tells the lane-turn controller which way to turn, as if the driver had put the
-blinker on. The driver's own blinker always wins, and the controller only acts below the lane-turn speed (LaneTurnValue)
-and with LaneTurnDesire enabled, so the navigation speed cap (see speed_cap.py) must have slowed the car first.
+Roundabouts (on by default): the model alone drives "straight on" through a roundabout, whatever the route says. Leaving
+a roundabout is always a turn to the right, so:
+- 1st exit: right from just before the entry until the exit is behind;
+- 2nd exit or later: nothing at the entry and in the ring (the model follows the ring), then right for the route's exit,
+  from just past the junction before it (Mapbox lists the junctions of the ring), so that an earlier exit is not taken.
+Never "left": in a roundabout that would point against the traffic.
 
-Roundabouts (optional, off by default) follow the exit number: 1st exit = right, 2nd = straight (no desire), 3rd or later = left.
+Intersection turns (off by default): at a turn of the route the model is told the side, as if the driver had put the
+blinker on.
+
+The driver's own blinker always wins, a car in the blind spot blocks it, and it only acts below max_kph, so the navigation
+speed cap (see speed_cap.py) must have slowed the car first. It does not need the Lane Turn Desire setting.
 
 Settings in /data/lightpilot/config.json (optional, no params keys):
-  {"nav_turn": {"enabled": true, "window_m": 25, "roundabout": false, "max_kph": 45}}
-max_kph: the route turn also works above the lane-turn speed, up to this (e.g. when the driver accelerates by hand).
+  {"nav_turn": {"roundabout": true, "enabled": false, "window_m": 25, "max_kph": 45}}
+"enabled" is for the intersection turns.
 """
 import json
 import time
@@ -24,10 +31,13 @@ TRACE_NEAR_M = 80.0  # log while a zone is this close ahead
 TRACE_MAX_BYTES = 200_000
 CONFIG_REFRESH_S = 5.0
 READ_INTERVAL_S = 0.2
-DEFAULTS = {'enabled': False, 'window_m': 25.0, 'roundabout': False, 'max_kph': 45.0}
+DEFAULTS = {'enabled': False, 'window_m': 25.0, 'roundabout': True, 'max_kph': 45.0}
 MIN_WINDOW_M, MAX_WINDOW_M = 5.0, 60.0
 MIN_MAX_KPH, MAX_MAX_KPH = 20.0, 60.0  # the route turn speed limit; the driver can be above the cap with the gas pedal
 AFTER_END_M = 5.0  # keep the desire this far past the end of the crossing, so that the turn is finished
+PAST_JUNCTION_M = 4.0  # in a ring, the desire for the route's exit starts this far past the junction before it
+BLIND_EXIT_M = 12.0  # ... or this far before the exit when the map does not say where that junction is
+MAX_EXIT_RUN_M = 30.0
 
 LEFT, RIGHT = 'left', 'right'
 
@@ -59,14 +69,18 @@ def modifier_side(modifier: str | None) -> str | None:
   return None
 
 
-def roundabout_side(exit_number) -> str | None:
+def roundabout_side(zone: dict, start: float, end: float) -> str | None:
+  """Right when it is time to leave the ring; start/end: meters to the entry and to the route's exit."""
+  exit_number = zone.get('exit')
   if not isinstance(exit_number, int) or isinstance(exit_number, bool):
-    return None
-  if exit_number == 1:
+    return RIGHT if modifier_side(zone.get('modifier')) == RIGHT else None  # a mini roundabout driven as a right turn
+  if exit_number <= 1:
     return RIGHT
-  if exit_number >= 3:
-    return LEFT
-  return None
+  if start > 0:
+    return None  # not in the ring yet: the entry is the model's
+  run = zone.get('exit_run')
+  known = isinstance(run, (int, float)) and not isinstance(run, bool) and run > 0
+  return RIGHT if end <= (min(run, MAX_EXIT_RUN_M) - PAST_JUNCTION_M if known else BLIND_EXIT_M) else None
 
 
 def turn_side(zones: list[dict], config: dict, v_ego: float, age: float) -> str | None:
@@ -76,12 +90,12 @@ def turn_side(zones: list[dict], config: dict, v_ego: float, age: float) -> str 
     start, end = zone['start'] - moved, zone['end'] - moved
     if start > config['window_m'] or end < -AFTER_END_M:
       continue
-    if zone['kind'] == 'turn':
+    if zone['kind'] == 'turn' and config['enabled']:
       return modifier_side(zone.get('modifier'))
     if zone['kind'] == 'roundabout' and config['roundabout']:
-      # only the entry, not the whole ring: the zone ends at the exit
-      if start + 15.0 >= 0:
-        return roundabout_side(zone.get('exit'))
+      side = roundabout_side(zone, start, end)
+      if side is not None:
+        return side
       continue
     # exits, stop signs and signals: not ours, but they do not hide a turn right behind them either
   return None
@@ -137,7 +151,7 @@ class NavTurn:
     try:
       if now - self.config_t >= CONFIG_REFRESH_S:
         self.config, self.config_t = load_config(self.config_path), now
-      if not self.config['enabled']:
+      if not (self.config['enabled'] or self.config['roundabout']):
         self.side = None
         return None
       if now - self.read_t >= READ_INTERVAL_S:

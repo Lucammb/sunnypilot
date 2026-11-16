@@ -48,11 +48,13 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   sul Konik e sul telefono, e sperimentale da prima della coda. Non frena da solo per questo.
 - **Diario di guida**: le ultime righe di `mode.log` (M) e `turn.log` (T) arrivano alla pagina del telefono
   (sezione "Diario di guida"). Richiede `api.php` e `index.html` aggiornati sul server.
-- **Svolta automatica da navigazione** (`nav_turn.py`, spenta di default): a una svolta del percorso, senza freccia, sotto
-  la velocità `LaneTurnValue` e con `LaneTurnDesire` attivo, il controller delle svolte (`lane_turn_desire.py`) riceve il
-  lato dal percorso. La tua freccia ha sempre la precedenza; l'angolo cieco la blocca. Rotonde (opzionali): 1ª uscita =
-  destra, 2ª = dritto, 3ª o oltre = sinistra. Si accende in `/data/lightpilot/config.json`:
-  `{"nav_turn": {"enabled": true, "window_m": 25, "roundabout": false}}` (vale entro pochi secondi, senza riavvio).
+- **Uscita dalle rotonde** (`nav_turn.py`, attiva di default): da solo il modello in rotonda tira dritto. Uscire da una
+  rotonda è sempre una svolta a destra, quindi al modello viene dato "svolta a destra": alla 1ª uscita da poco prima
+  dell'ingresso fino a uscita fatta; dalla 2ª in poi niente all'ingresso e nell'anello, poi destra solo dopo aver
+  superato l'innesto precedente all'uscita del percorso (4 m dopo; gli ultimi 12 m se la mappa non dà gli innesti).
+  Mai "sinistra". Sotto i 45 km/h; la freccia dall'altro lato la annulla, quella a destra no; un'auto nell'angolo cieco
+  la blocca. Non richiede *Lane Turn Desire*. Ogni decisione è in `turn.log`. Le svolte agli incroci restano spente:
+  `{"nav_turn": {"roundabout": true, "enabled": false, "window_m": 25, "max_kph": 45}}` (`enabled` = svolte agli incroci).
 - **Uscite di tangenziale e autostrada** (`nav_exit.py`): avviso "tieniti a destra" sul Konik e sul telefono quando la
   prossima manovra è un'uscita entro 1500 m. Velocità: sulle corsie di marcia solo fino a 80 km/h (mai meno) e solo vicino
   all'uscita (ultimi ~600 m); sotto gli 80, fino alla velocità di svincolo (60 km/h), solo dopo il punto in cui lo svincolo

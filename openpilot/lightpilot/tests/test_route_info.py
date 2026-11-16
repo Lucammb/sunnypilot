@@ -60,6 +60,19 @@ class TestShape(unittest.TestCase):
     self.assertIsNone(route_info.ring_radius(np.array(path(line((0, 0), (40, 0))))))  # drawn straight: no radius
     self.assertIsNone(route_info.ring_radius(np.array(path([(0, 0), (10, 0)]))))
 
+  def test_the_last_stretch_of_a_ring_before_the_routes_exit(self):
+    points = arc((0, 0), 18.0, 200, 340)  # 44 m of ring; another road joins half way (at 270 degrees)
+    mid = (18.0 * math.cos(math.radians(270)), 18.0 * math.sin(math.radians(270)))
+    ring = step(points, 'roundabout', exit=2, intersections=[{'location': path([points[0]])[0]}, {'location': path([mid])[0]},
+                                                               {'location': path([points[-1]])[0]}])
+    first = step(line((-300, points[0][1]), points[0]), 'depart')
+    zones = route_zones.extract_zones([first, ring], geometry([first, ring]))
+    self.assertEqual(zones[0]['kind'], 'roundabout')
+    self.assertAlmostEqual(zones[0]['exit_run'], ring['distance'] / 2, delta=1.5)
+    self.assertAlmostEqual(zones[0]['radius'], 18.0, delta=0.5)
+    alone = step(points, 'roundabout', exit=1, intersections=[{'location': path([points[0]])[0]}])
+    self.assertNotIn('exit_run', route_zones.extract_zones([first, alone], geometry([first, alone]))[0])  # first exit: no junction inside
+
   def test_roundabout_speed_follows_its_radius(self):
     def target(radius):
       return zone_target({'kind': 'roundabout', 'start': 0, 'end': 40, 'radius': radius}, DEFAULTS) / KPH

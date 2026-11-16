@@ -47,28 +47,58 @@ class TestTurnSide:
     assert turn_side([exit_zone, turn(18, 'left')], CFG, 5, 0) == LEFT
     assert turn_side([{'kind': 'stop', 'start': 2, 'end': 12}], CFG, 5, 0) is None
 
-  def test_roundabout_off_by_default(self):
+  def test_roundabout_can_be_turned_off(self):
     assert turn_side([roundabout(10, 1)], CFG, 5, 0) is None
 
-  def test_roundabout_exits(self):
-    assert turn_side([roundabout(10, 1)], RA_CFG, 5, 0) == RIGHT
-    assert turn_side([roundabout(10, 2)], RA_CFG, 5, 0) is None
-    assert turn_side([roundabout(10, 3)], RA_CFG, 5, 0) == LEFT
+  def test_first_exit_is_right_from_before_the_entry_until_out(self):
+    for start in (20, 10, 0, -15, -38, -44):  # 40 m of ring: approaching, entering, inside, leaving, 4 m past the exit
+      assert turn_side([roundabout(start, 1)], RA_CFG, 5, 0) == RIGHT, start
+    assert turn_side([roundabout(40, 1)], RA_CFG, 5, 0) is None  # still far
+    assert turn_side([roundabout(-50, 1)], RA_CFG, 5, 0) is None  # 10 m past the exit: done
+
+  def test_later_exit_is_right_only_past_the_junction_before_it(self):
+    ring = {**roundabout(10, 2, length=60), 'exit_run': 22.0}  # the junction before the route's exit is 22 m before it
+    assert turn_side([ring], RA_CFG, 5, 0) is None  # at the entry: the model's own
+    assert turn_side([{**ring, 'start': -20, 'end': 40}], RA_CFG, 5, 0) is None  # in the ring, the other exit still ahead
+    assert turn_side([{**ring, 'start': -37, 'end': 23}], RA_CFG, 5, 0) is None  # at that exit: not this one
+    assert turn_side([{**ring, 'start': -43, 'end': 17}], RA_CFG, 5, 0) == RIGHT  # past it: now
+    assert turn_side([{**ring, 'start': -63, 'end': -3}], RA_CFG, 5, 0) == RIGHT
+    assert turn_side([{**ring, 'start': -70, 'end': -10}], RA_CFG, 5, 0) is None
+
+  def test_later_exit_never_left_and_blind_without_the_junction(self):
+    for exit_number in (2, 3, 4):
+      assert turn_side([roundabout(5, exit_number)], RA_CFG, 5, 0) is None
+      assert turn_side([roundabout(-25, exit_number)], RA_CFG, 5, 0) is None  # 15 m before the exit
+      assert turn_side([roundabout(-30, exit_number)], RA_CFG, 5, 0) == RIGHT  # the last 12 m
+    far = {**roundabout(-20, 3, length=100), 'exit_run': 70.0}  # a long last stretch: not the whole of it
+    assert turn_side([far], RA_CFG, 5, 0) is None
+    assert turn_side([{**far, 'start': -76, 'end': 24}], RA_CFG, 5, 0) == RIGHT
+
+  def test_mini_roundabout_without_exit_number(self):
+    assert turn_side([{**roundabout(10, None), 'modifier': 'right'}], RA_CFG, 5, 0) == RIGHT
+    assert turn_side([{**roundabout(10, None), 'modifier': 'left'}], RA_CFG, 5, 0) is None
     assert turn_side([roundabout(10, None)], RA_CFG, 5, 0) is None
 
-  def test_roundabout_only_at_entry(self):
-    assert turn_side([roundabout(-25, 1)], RA_CFG, 5, 0) is None
+  def test_intersection_turns_need_their_own_switch(self):
+    assert turn_side([turn(20)], {**RA_CFG, 'enabled': False}, 5, 0) is None
+    assert turn_side([roundabout(10, 1)], {**RA_CFG, 'enabled': False}, 5, 0) == RIGHT
+
+  def test_the_age_of_the_data_moves_the_car_on(self):
+    ring = {**roundabout(-30, 2, length=60), 'exit_run': 22.0}  # 30 m to the exit when the position was measured
+    assert turn_side([ring], RA_CFG, 6.0, 0.0) is None
+    assert turn_side([ring], RA_CFG, 6.0, 2.5) == RIGHT  # 2.5 s later at 6 m/s: 15 m to the exit
 
 
 class TestConfig:
   def test_defaults_off(self, tmp_path):
-    assert load_config(tmp_path / "missing.json")['enabled'] is False
+    config = load_config(tmp_path / "missing.json")
+    assert config['enabled'] is False and config['roundabout'] is True  # intersection turns off, roundabout exits on
 
   def test_user_values_and_clamp(self, tmp_path):
     path = tmp_path / "c.json"
     path.write_text(json.dumps({'nav_turn': {'enabled': True, 'window_m': 500, 'roundabout': 'yes'}}))
     config = load_config(path)
-    assert config['enabled'] is True and config['window_m'] == nav_turn.MAX_WINDOW_M and config['roundabout'] is False
+    assert config['enabled'] is True and config['window_m'] == nav_turn.MAX_WINDOW_M and config['roundabout'] is True  # not a boolean: the default
 
   def test_garbage(self, tmp_path):
     path = tmp_path / "c.json"
@@ -138,8 +168,14 @@ class TestController:
   def test_blindspot_blocks(self, tmp_path):
     assert self.run(self.controller(tmp_path), br=True) == TurnDirection.none
 
-  def test_lane_turn_desire_off(self, tmp_path):
-    assert self.run(self.controller(tmp_path, enabled=False)) == TurnDirection.none
+  def test_route_turn_does_not_need_the_lane_turn_desire_setting(self, tmp_path):
+    c = self.controller(tmp_path, enabled=False)
+    assert self.run(c) == TurnDirection.turnRight
+    assert self.run(c, left=True) == TurnDirection.none  # the setting is off: no blinker turns, and a blinker the other way stops the route's
+    assert self.run(c, right=True) == TurnDirection.turnRight  # signalling the exit does not cancel it
+
+  def test_blinker_on_the_routes_side_keeps_it(self, tmp_path):
+    assert self.run(self.controller(tmp_path), v=40 / 3.6, right=True) == TurnDirection.turnRight
 
   def test_nav_turn_off(self, tmp_path):
     assert self.run(self.controller(tmp_path, nav_enabled=False)) == TurnDirection.none

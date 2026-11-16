@@ -164,6 +164,15 @@ def ring_radius(geometry: np.ndarray) -> float | None:
   return radius if MIN_RING_RADIUS_M <= radius <= MAX_RING_RADIUS_M else None
 
 
+def exit_run(step: dict, geometry: np.ndarray) -> float | None:
+  """Meters of a roundabout step from its last junction to its end (the route's exit), or None if the map shows no
+  junction inside the ring. The junctions are the other roads of the roundabout: exits not to take."""
+  distance = step['distance']
+  offsets = [locate(n, geometry, distance) for n in step.get('intersections', [])]
+  inside = [o for o in offsets if o is not None and 3.0 < o < distance - 3.0]
+  return float(distance - max(inside)) if inside else None
+
+
 def turn_angle(maneuver: dict) -> float | None:
   """Degrees the road turns by at a maneuver (0: straight on, 180: back), from Mapbox's bearings."""
   before, after = maneuver.get('bearing_before'), maneuver.get('bearing_after')
