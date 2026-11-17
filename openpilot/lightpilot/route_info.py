@@ -114,6 +114,8 @@ def tunnels(route: list[dict], route_geometry: list[np.ndarray], starts: list[fl
       offset = locate(intersection, route_geometry[i], step['distance'])
       if offset is not None:
         marks.append((starts[i] + offset, 'tunnel' in (intersection.get('classes') or [])))
+  if not marks:
+    return []
   marks.sort()
   total = starts[-1] + route[-1]['distance'] if route else 0.0
   found: list[tuple[float, float]] = []
@@ -164,11 +166,22 @@ def ring_radius(geometry: np.ndarray) -> float | None:
   return radius if MIN_RING_RADIUS_M <= radius <= MAX_RING_RADIUS_M else None
 
 
+def leaves_the_ring(intersection: dict) -> bool:
+  """True if a road leaves the ring at this junction (an exit not to take). An arm that only enters the ring is another
+  junction of the map, but the car cannot take it: Mapbox marks it with entry=false, and each arm of a roundabout with a
+  splitter island has both, a few meters apart. Unknown: assume it does."""
+  bearings, entry = intersection.get('bearings'), intersection.get('entry')
+  if not isinstance(bearings, list) or not isinstance(entry, list) or len(bearings) != len(entry):
+    return True
+  own = {i for i in (intersection.get('in'), intersection.get('out')) if isinstance(i, int) and not isinstance(i, bool)}
+  return any(allowed is True and i not in own for i, allowed in enumerate(entry))
+
+
 def exit_run(step: dict, geometry: np.ndarray) -> float | None:
-  """Meters of a roundabout step from its last junction to its end (the route's exit), or None if the map shows no
-  junction inside the ring. The junctions are the other roads of the roundabout: exits not to take."""
+  """Meters of a roundabout step from its last exit to its end (the route's exit), or None if the map shows no exit
+  inside the ring. Those exits are the other roads of the roundabout: the ones not to take."""
   distance = step['distance']
-  offsets = [locate(n, geometry, distance) for n in step.get('intersections', [])]
+  offsets = [locate(n, geometry, distance) for n in step.get('intersections', []) if leaves_the_ring(n)]
   inside = [o for o in offsets if o is not None and 3.0 < o < distance - 3.0]
   return float(distance - max(inside)) if inside else None
 

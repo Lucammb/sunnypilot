@@ -73,6 +73,18 @@ class TestShape(unittest.TestCase):
     alone = step(points, 'roundabout', exit=1, intersections=[{'location': path([points[0]])[0]}])
     self.assertNotIn('exit_run', route_zones.extract_zones([first, alone], geometry([first, alone]))[0])  # first exit: no junction inside
 
+  def test_an_arm_that_only_enters_the_ring_is_not_an_exit(self):
+    points = arc((0, 0), 18.0, 200, 340)
+    mid = path([(18.0 * math.cos(math.radians(270)), 18.0 * math.sin(math.radians(270)))])[0]
+    near_end = path([points[-3]])[0]  # the entry of the arm just before the route's exit: nothing to drive out on
+    ring = step(points, 'roundabout', exit=3, intersections=[
+      {'location': mid, 'bearings': [0, 90, 180], 'entry': [True, True, False], 'in': 2, 'out': 1},  # arm 0 leads out
+      {'location': near_end, 'bearings': [10, 100, 200], 'entry': [False, False, False], 'in': 2, 'out': 1}])
+    self.assertAlmostEqual(route_info.exit_run(ring, np.array(ring['geometry']['coordinates'])), ring['distance'] / 2, delta=1.5)
+    self.assertTrue(route_info.leaves_the_ring({'location': mid}))  # no flags: assume it does
+    self.assertTrue(route_info.leaves_the_ring({'bearings': [0, 90, 180], 'entry': [True, True, True], 'in': 0, 'out': 1}))
+    self.assertFalse(route_info.leaves_the_ring({'bearings': [0, 90, 180], 'entry': [False, True, False], 'in': 2, 'out': 1}))
+
   def test_roundabout_speed_follows_its_radius(self):
     def target(radius):
       return zone_target({'kind': 'roundabout', 'start': 0, 'end': 40, 'radius': radius}, DEFAULTS) / KPH
@@ -188,6 +200,10 @@ class TestAnnotations(unittest.TestCase):
                                                                   {'location': [1400 * METER, 0], 'classes': []}])]
     found = route_info.tunnels(steps, geometry(steps), route_zones.step_starts(steps))
     self.assertEqual([(round(a), round(b)) for a, b in found], [(300, 1400)])
+
+  def test_tunnels_of_a_route_without_intersections(self):
+    steps = [step(line((0, 0), (500, 0)), 'depart')]
+    self.assertEqual(route_info.tunnels(steps, geometry(steps), route_zones.step_starts(steps)), [])
 
 
 class TestNavd(unittest.TestCase):

@@ -275,6 +275,24 @@ class RouteEngine:
   def lightpilot_in_tunnel(self, progress: float) -> bool:
     return any(start - TUNNEL_MARGIN[0] <= progress <= end + TUNNEL_MARGIN[1] for start, end in self.lp_tunnels)
 
+  def lightpilot_position(self, along_geometry: float, off_route: float) -> tuple[float, float]:
+    """lightpilot: (meters along the route, distance from the route) of the car.
+
+    After a turn the car is already on the next step, but navd goes on measuring against the current one until the car is
+    10 m past its end, in a straight line from the start of the step's last segment: where the map has few points (a
+    straight road) that is far past the turn, and for those seconds the car looked 30 m, 50 m... away from the route (no
+    data at all) with its progress wrong. So when the next step's own line is nearer, the car is on it."""
+    progress = self.lp_step_starts[self.step_idx] + along_geometry
+    try:
+      following = self.step_idx + 1
+      if off_route > 1.0 and following < len(self.route_geometry):
+        along_next, lateral_next = along_path(self.route_geometry[following], self.last_position)
+        if lateral_next < off_route:
+          return self.lp_step_starts[following] + along_next, lateral_next
+    except Exception:
+      cloudlog.exception("lightpilot: failed to place the car on the next step")
+    return progress, off_route
+
   def write_lightpilot_zones(self, along_geometry: float, off_route: float = 0.0):
     """lightpilot: publish the zones ahead of the car, as distances, for the longitudinal planner.
 
@@ -286,8 +304,9 @@ class RouteEngine:
     try:
       now = time.monotonic()
       if self.lp_gps_ok or self.lp_progress is None:
+        progress, off_route = self.lightpilot_position(along_geometry, off_route)
         self.lp_off_route = self.lp_off_route + 1 if off_route > REROUTE_DISTANCE else 0
-        self.lp_progress = self.lp_step_starts[self.step_idx] + along_geometry
+        self.lp_progress = progress
         self.lp_progress_time = now if self.lp_fix_time is None else self.lp_fix_time
       elif self.lightpilot_in_tunnel(self.lp_progress):
         self.lp_progress += max(float(self.sm['carState'].vEgo), 0.0) * min(max(now - self.lp_progress_time, 0.0), 30.0)

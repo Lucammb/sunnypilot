@@ -52,6 +52,9 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   rotonda è sempre una svolta a destra, quindi al modello viene dato "svolta a destra": alla 1ª uscita da poco prima
   dell'ingresso fino a uscita fatta; dalla 2ª in poi niente all'ingresso e nell'anello, poi destra solo dopo aver
   superato l'innesto precedente all'uscita del percorso (4 m dopo; gli ultimi 12 m se la mappa non dà gli innesti).
+  Contano solo gli innesti da cui si può uscire (`entry` di Mapbox): il solo ingresso di un braccio non è un'uscita,
+  altrimenti la finestra della 3ª uscita si riduce a un secondo. Una freccia del guidatore ha la precedenza sul percorso
+  (Lane Turn Desire attivo, sotto ~32 km/h): in `turn.log` compare come `driver blinker left/right`.
   Mai "sinistra". Sotto i 45 km/h; la freccia dall'altro lato la annulla, quella a destra no; un'auto nell'angolo cieco
   la blocca. Non richiede *Lane Turn Desire*. Ogni decisione è in `turn.log`. Le svolte agli incroci restano spente:
   `{"nav_turn": {"roundabout": true, "enabled": false, "window_m": 25, "max_kph": 45}}` (`enabled` = svolte agli incroci).

@@ -277,6 +277,38 @@ class TestNavdWritesZones(unittest.TestCase):
       engine.send_instruction()
       self.assertIsNone(route_zones.read_zones())  # no route: no data at all
 
+  def test_the_car_that_has_turned_is_on_the_next_step(self):
+    # the last step before a turn has few map points: the car, already round the corner, is far from its straight line
+    def north(length_m, start_m, **extra):
+      coords = [[400 * METER, (start_m + k * length_m / 2) * METER] for k in range(3)]
+      return {'geometry': {'coordinates': coords}, 'distance': length_m, 'duration': length_m / 10, 'bannerInstructions': [], **extra}
+
+    steps = [straight_step(400, 0, maneuver={'type': 'depart'}),
+             north(500, 0, maneuver={'type': 'turn', 'modifier': 'left'},
+                   intersections=[{'stop_sign': True, 'geometry_index': 4, 'location': [400 * METER, 200 * METER]}]),
+             north(50, 500, maneuver={'type': 'arrive'})]
+    response = MagicMock(status_code=200)
+    response.json.return_value = {'routes': [{'legs': [{'steps': steps}]}]}
+    params = MagicMock()
+    params.get.side_effect = {'NavDestination': {'latitude': 550 * METER, 'longitude': 400 * METER}, 'LanguageSetting': 'main_it'}.get
+    with tempfile.TemporaryDirectory() as d, patch('openpilot.selfdrive.navigation.navd.Api'), \
+         patch('openpilot.selfdrive.navigation.navd.load_mapbox_token', return_value='pk.x'), \
+         patch.object(route_zones, 'ZONES_PATH', str(Path(d) / 'zones.json')):
+      engine = RouteEngine(MagicMock(), MagicMock(), params=params)
+      engine.last_position, engine.last_bearing = (0, 0), 90
+      engine.lp_gps_ok = True
+      with patch('requests.get', return_value=response):
+        engine.calculate_route((400 * METER, 550 * METER))
+      for north_m in (40, 60, 90):  # round the corner, well past the end of the straight step, on the new road
+        engine.last_position = (400 * METER, north_m * METER)
+        for _ in range(3):  # no false "wrong way" after any number of fixes
+          engine.send_instruction()
+          read = route_zones.read_zones()
+          self.assertIsNotNone(read, north_m)
+        zones, _ = read
+        stop = next(z for z in zones if z['kind'] == 'stop')
+        self.assertAlmostEqual(stop['start'] + route_zones.POINT_ZONE_M / 2, 200 - north_m, delta=15)
+
 
 if __name__ == '__main__':
   unittest.main()

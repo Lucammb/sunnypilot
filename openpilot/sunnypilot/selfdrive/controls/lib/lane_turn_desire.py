@@ -45,10 +45,10 @@ class LaneTurnController:
     self.from_route = False
     if self.enabled and left_blinker and not right_blinker and v_ego < self.lane_turn_value and not blindspot_left:
       self.turn_direction = TurnDirection.turnLeft
-      reason = 'driver blinker'
+      reason = 'driver blinker left'
     elif self.enabled and right_blinker and not left_blinker and v_ego < self.lane_turn_value and not blindspot_right:
       self.turn_direction = TurnDirection.turnRight
-      reason = 'driver blinker'
+      reason = 'driver blinker right'
     elif v_ego < nav_limit and ((not left_blinker and not right_blinker) or (right_blinker and not left_blinker and nav_side == RIGHT) or
                                 (left_blinker and not right_blinker and nav_side == LEFT)):
       # lightpilot: no blinker, or the blinker on the route's own side: the route decides (a blinker the other way always wins)
