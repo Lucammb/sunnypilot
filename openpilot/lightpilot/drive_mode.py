@@ -142,6 +142,20 @@ def read_status(path: str | None = None, now: float | None = None) -> dict | Non
     return None
 
 
+_shown = (0.0, False)
+
+
+def experimental_now() -> bool:
+  """Is the car driving in experimental mode now (what the planner decided, else the driver's choice)? For the screen:
+  it is read at most twice a second."""
+  global _shown
+  now = time.monotonic()
+  if now - _shown[0] >= REFRESH_S:
+    status = read_status()
+    _shown = (now, status['e2e'] if status is not None else read_choice() == EXPERIMENTAL)
+  return _shown[1]
+
+
 class DriveMode:
   def __init__(self, choice_path: Path | None = None, config_path: Path | None = None, zones_path: str | None = None,
                status_path: str | None = None, trace_path: Path | None = None):

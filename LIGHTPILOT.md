@@ -78,6 +78,8 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
   modalità. Ogni decisione è scritta in `/data/lightpilot/mode.log` (`tail -f /data/lightpilot/mode.log`). Opzioni in `config.json`:
   `{"drive_mode": {"auto_in_navigation": true, "slow_kph": 60, "ahead_s": 12, "min_ahead_m": 150}}`.
 
+- **Grandangolo fisso in experimental**: lo schermo mostra la camera grandangolare (non solo sotto ~18 km/h) finché si guida in experimental (`experimental_now()` in `drive_mode.py`). Cambia solo la vista: il modello usa già entrambe le camere a ogni velocità.
+
 ### Prossime fasi
 2. Avviso corsia per uscite/bivi; poi deceleriamo verso l'uscita dopo un cambio corsia manuale.
 3. App di destinazione su navigazione.lucabargigia.it, con il dispositivo che interroga il server.

@@ -1,5 +1,6 @@
 import numpy as np
 import pyray as rl
+from openpilot.lightpilot.drive_mode import experimental_now
 from openpilot.cereal import log
 from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.selfdrive.ui import UI_BORDER_SIZE
@@ -142,7 +143,7 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
   def _switch_stream_if_needed(self, sm):
     if sm['carParams'].openpilotLongitudinalControl and WIDE_CAM in self.available_streams:
       v_ego = sm['carState'].vEgo
-      if v_ego < WIDE_CAM_MAX_SPEED:
+      if v_ego < WIDE_CAM_MAX_SPEED or experimental_now():  # lightpilot: wide view stays on in experimental mode
         target = WIDE_CAM
       elif v_ego > ROAD_CAM_MIN_SPEED:
         target = NARROW_ROAD_CAM
