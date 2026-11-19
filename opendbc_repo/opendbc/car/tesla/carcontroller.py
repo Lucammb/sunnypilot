@@ -36,13 +36,16 @@ class CarController(CarControllerBase, CoopSteeringCarController):
     # When enabling in a tight curve, we wait until user reduces steering force to start steering.
     # Canceling is done on rising edge and is handled generically with CC.cruiseControl.cancel
     lat_active = CC.latActive and CS.hands_on_level < 3
+    lat_active = self.coop_lat_active(lat_active, CS)  # lightpilot: cooperative steering (off unless enabled in the settings)
 
     if self.frame % 2 == 0:
       # Angular rate limit based on speed
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)
 
-      can_sends.append(self.tesla_can.create_steering_control(self.apply_angle_last, lat_active, self.coop_steering.control_type))
+      # lightpilot: cooperative steering adds the driver's push to the angle (unchanged when it is off)
+      apply_angle = self.coop_apply_angle(self.apply_angle_last, lat_active, CS, self.VM)
+      can_sends.append(self.tesla_can.create_steering_control(apply_angle, lat_active, self.coop_steering.control_type))
 
     if self.frame % 10 == 0:
       can_sends.append(self.tesla_can.create_steering_allowed())

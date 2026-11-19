@@ -80,6 +80,15 @@ Base: sunnypilot `staging` v2026.003.000, commit `9a6b7b89c9` (2026-10-20).
 
 - **Grandangolo fisso in experimental**: lo schermo mostra la camera grandangolare (non solo sotto ~18 km/h) finché si guida in experimental (`experimental_now()` in `drive_mode.py`). Cambia solo la vista: il modello usa già entrambe le camere a ogni velocità.
 
+- **Sterzo cooperativo Tesla (come TeslaPilot)**: interruttore "Cooperative Steering (Beta)" in Impostazioni → Veicolo (spento di
+  default; si cambia a macchina spenta). La spinta sul volante diventa angolo extra sommato a quello richiesto (metodo VTB di dzid26,
+  lo stesso di TeslaPilot): una spinta leggera ti porta dove spingi, lasciando il volante torna sul percorso. Si guida sempre con
+  `ANGLE_CONTROL`, mai con `LANE_KEEP_ASSIST` (con il tipo LKAS il laterale si era fermato): il messaggio di sterzo è identico a
+  quello senza l'opzione, cambia solo il valore dell'angolo, sempre nei limiti del panda, quindi il panda non cambia e non serve
+  riscriverlo. Presa decisa (più di 5 Nm, livello mani 3 o
+  override veloce) = lo sterzo si ferma. Codice: `opendbc_repo/opendbc/sunnypilot/car/tesla/coop_steering.py`, test
+  `openpilot/lightpilot/tests/test_tesla_coop_steering.py`.
+
 ### Prossime fasi
 2. Avviso corsia per uscite/bivi; poi deceleriamo verso l'uscita dopo un cambio corsia manuale.
 3. App di destinazione su navigazione.lucabargigia.it, con il dispositivo che interroga il server.
