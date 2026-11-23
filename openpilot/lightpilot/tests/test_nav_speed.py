@@ -10,7 +10,7 @@ import numpy as np
 
 from openpilot.common.constants import CV
 from openpilot.lightpilot import route_zones
-from openpilot.lightpilot.speed_cap import (BRAKING_OFFSET_M, DEFAULTS, NavSpeedCap, Resume, allowed_speed, apply_cap, compute_cap,
+from openpilot.lightpilot.speed_cap import (BRAKING_OFFSET_M, DEFAULTS, ROUNDABOUT_REACH_M, NavSpeedCap, Resume, allowed_speed, apply_cap, compute_cap,
                                             load_config)
 from openpilot.selfdrive.navigation.navd import RouteEngine
 
@@ -142,11 +142,48 @@ class TestCap(unittest.TestCase):
 
   def test_roundabout_and_turn_reach_target_early_stop_does_not(self):
     config = dict(DEFAULTS)
-    for kind, kph in (('roundabout', 30.0), ('turn', 30.0)):
-      cap = compute_cap([{'kind': kind, 'start': 40.0, 'end': 60.0}], config, 13.0, 0.0)[0]
-      self.assertAlmostEqual(cap, kph / 3.6, places=3)  # already at the target 40 m before the zone
+    cap = compute_cap([{'kind': 'turn', 'start': 40.0, 'end': 60.0}], config, 13.0, 0.0)[0]
+    self.assertAlmostEqual(cap, 30.0 / 3.6, places=3)  # already at the target 40 m before the zone
     stop = compute_cap([{'kind': 'stop', 'start': 40.0, 'end': 45.0}], config, 13.0, 0.0)[0]
     self.assertGreater(stop, 25.0 / 3.6)  # stops keep the late 8 m offset
+
+  def test_roundabout_yield_brakes_late_and_firm_then_waits_for_the_driver(self):
+    config = dict(DEFAULTS)
+    ring = {'kind': 'roundabout', 'start': 150.0, 'end': 230.0}
+    v_ego = 50 * KPH
+    far = compute_cap([ring], config, v_ego, 0.0, yield_ok=False)
+    self.assertGreater(far[0], v_ego)  # 150 m before the entry at 50 km/h: no braking yet (the old cap braked from ~235 m; now ~105 m)
+    self.assertAlmostEqual(far[2], config['roundabout_decel'])
+    near = compute_cap([{**ring, 'start': 50.0, 'end': 130.0}], config, v_ego, 0.0, yield_ok=False)
+    self.assertLess(near[0], v_ego)
+    at_entry = compute_cap([{**ring, 'start': ROUNDABOUT_REACH_M, 'end': 88.0}], config, v_ego, 0.0, yield_ok=False)
+    self.assertAlmostEqual(at_entry[0], 15 * KPH, places=3)  # at the yield speed 8 m before the entry
+    waiting = compute_cap([{**ring, 'start': -10.0, 'end': 70.0}], config, v_ego, 0.0, yield_ok=False)
+    self.assertAlmostEqual(waiting[0], 15 * KPH, places=3)  # holds until the driver says go
+    go = compute_cap([{**ring, 'start': -10.0, 'end': 70.0}], config, v_ego, 0.0, yield_ok=True)
+    self.assertAlmostEqual(go[0], 30 * KPH, places=3)  # then the ring speed
+    off = compute_cap([ring], {**config, 'roundabout_yield_kph': 0.0}, v_ego, 0.0, yield_ok=False)
+    self.assertAlmostEqual(off[2], config['roundabout_decel'])
+    inside = compute_cap([{**ring, 'start': 0.0, 'end': 80.0}], {**config, 'roundabout_yield_kph': 0.0}, v_ego, 0.0, False)
+    self.assertAlmostEqual(inside[0], 30 * KPH, places=3)  # wait switched off: ring speed straight away
+
+  def test_yield_confirmed_by_gas_near_the_entry_only(self):
+    with tempfile.TemporaryDirectory() as d:
+      path = str(Path(d) / 'zones.json')
+      cap = NavSpeedCap(config_path=Path(d) / 'none.json', zones_path=path)
+      v = 5.0
+      def at(start, gas):
+        route_zones.write_zones([{'kind': 'roundabout', 'start': start, 'end': start + 80.0}], path, now=time.monotonic())
+        return cap.update(v, 10.0, 0.0, gas)[0]
+      self.assertAlmostEqual(at(120.0, True), 10.0)  # gas far from the entry: no confirmation (and no cap needed yet)
+      self.assertFalse(cap.yield_ok)
+      self.assertAlmostEqual(at(8.0, False), 15 * KPH, places=2)  # waiting at the yield speed
+      self.assertAlmostEqual(at(8.0, True), 30 * KPH, places=2)  # gas near the entry: go, at the ring speed
+      self.assertTrue(cap.yield_ok)
+      self.assertAlmostEqual(at(-20.0, False), 30 * KPH, places=2)  # stays confirmed inside the ring
+      route_zones.write_zones([], path, now=time.monotonic())
+      cap.update(v, 10.0, 0.0, False)
+      self.assertFalse(cap.yield_ok)  # next roundabout asks again
 
   def test_kinds_and_off_switches(self):
     config = {**DEFAULTS, 'signal_kph': 0.0}

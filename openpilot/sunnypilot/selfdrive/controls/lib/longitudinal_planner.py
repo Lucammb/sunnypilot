@@ -85,7 +85,7 @@ class LongitudinalPlannerSP:
 
     # lightpilot: navigation speed cap. It can only lower the target; the driver's gas pedal overrides it as for any target.
     v_free = self.output_v_target
-    self.output_v_target, self.output_a_target = self.lp_nav_cap.update(CS.vEgo, self.output_v_target, self.output_a_target)
+    self.output_v_target, self.output_a_target = self.lp_nav_cap.update(CS.vEgo, self.output_v_target, self.output_a_target, CS.gasPressed)
     self.output_v_target, self.output_a_target = self.lp_nav_exit.update(CS.vEgo, self.output_v_target, self.output_a_target,
                                                                          CS.leftBlinker, CS.rightBlinker)
     self.lp_decel = self.lp_nav_exit.decel or self.lp_nav_cap.decel  # the exit cap is applied last: when active it is the lower one

@@ -9,9 +9,13 @@ through the zone and released a few meters after it.
 Settings live in /data/lightpilot/config.json (optional), so no params keys are involved:
   {"nav_speed_cap": {"enabled": true, "roundabout_kph": 30, "turn_kph": 30, "slight_turn_kph": 50, "stop_kph": 25, "signal_kph": 0,
                      "yield_kph": 30, "toll_kph": 30, "rail_kph": 30, "curve_kph": 60, "shape": true, "lat_accel": 2.3,
-                     "decel": 0.45, "resume_accel": 1.0}}
+                     "decel": 0.45, "resume_accel": 1.0, "roundabout_yield_kph": 15, "roundabout_decel": 0.9}}
 A speed of 0 turns that kind of zone off. slight_turn_kph is for "bear left/right" turns. resume_accel (m/s^2) is how fast
 the target speed comes back after any navigation cap (roundabout, turn, exit). Takes effect within a few seconds, no restart.
+
+Roundabout yield: the car brakes firmly (roundabout_decel) to roundabout_yield_kph just before the entry and stays there
+until the driver touches the accelerator within 60 m of the entry or in the ring; then it drives the ring at its own speed.
+It does not detect other cars: the driver decides when it is clear. roundabout_yield_kph 0 turns the wait off.
 
 With "shape" on, the speed comes from the road's own shape when the map shows it: sqrt(lat_accel * radius) in a roundabout
 (20 to 40 km/h) and in a tight curve (20 km/h to curve_kph), and by the angle at a turn (20 km/h for a hairpin turn,
@@ -33,7 +37,7 @@ CONFIG_FILE = LIGHTPILOT_DIR / "config.json"
 CONFIG_REFRESH_S = 5.0
 DEFAULTS = {'enabled': True, 'roundabout_kph': 30.0, 'turn_kph': 30.0, 'slight_turn_kph': 50.0, 'stop_kph': 25.0, 'signal_kph': 0.0,
             'yield_kph': 30.0, 'toll_kph': 30.0, 'rail_kph': 30.0, 'curve_kph': 60.0, 'shape': True, 'lat_accel': 2.3, 'decel': 0.45,
-            'resume_accel': 1.0}
+            'resume_accel': 1.0, 'roundabout_yield_kph': 15.0, 'roundabout_decel': 0.9}
 KIND_KEYS = {'roundabout': 'roundabout_kph', 'turn': 'turn_kph', 'stop': 'stop_kph', 'signal': 'signal_kph', 'yield': 'yield_kph',
              'toll': 'toll_kph', 'rail': 'rail_kph', 'curve': 'curve_kph'}  # 'exit', 'merge' and 'jam' never cap
 RING_KPH = (20.0, 40.0)  # a roundabout's speed from its radius stays within these
@@ -43,9 +47,13 @@ MIN_LAT_ACCEL, MAX_LAT_ACCEL = 1.5, 3.5
 KIND_DECEL = {'toll': 0.8}  # at least this deceleration: from motorway speed the usual one would start over a kilometer before
 BRAKING_OFFSET_M = 8.0  # the target speed is reached this far before the zone (stops)
 REACH_EARLY_M = 40.0  # roundabouts and turns: already at the target this far before, so the turn assist can act
-EARLY_KINDS = ('roundabout', 'turn', 'toll')
+EARLY_KINDS = ('turn', 'toll')
+ROUNDABOUT_REACH_M = 8.0  # roundabouts: slow down close to the entry, firmly, not gently from far away
+YIELD_CONFIRM_M = 60.0  # the driver's gas within this distance of the entry (or inside the ring) means "clear, go"
+YIELD_FORGET_M = 150.0  # no roundabout this close: forget the last confirmation
 RELEASE_M = 5.0  # hold the cap this far past the end of the zone
-MIN_DECEL, MAX_DECEL = 0.2, 1.0  # a config typo must not make the car brake hard or not at all
+MIN_DECEL, MAX_DECEL = 0.2, 1.0
+MAX_ROUNDABOUT_DECEL = 1.1  # the planner never takes more than 1.2  # a config typo must not make the car brake hard or not at all
 MIN_RESUME, MAX_RESUME = 0.5, 2.0  # m/s^2; 2.0 is what the base software does
 
 
@@ -90,6 +98,8 @@ def load_config(path: Path | None = None) -> dict:
         config[key] = float(value)
   except (OSError, ValueError, AttributeError):
     pass
+  config['roundabout_decel'] = min(max(float(config['roundabout_decel']), MIN_DECEL), MAX_ROUNDABOUT_DECEL)
+  config['roundabout_yield_kph'] = max(float(config['roundabout_yield_kph']), 0.0)
   config['decel'] = min(max(float(config['decel']), MIN_DECEL), MAX_DECEL)
   config['resume_accel'] = min(max(float(config['resume_accel']), MIN_RESUME), MAX_RESUME)
   config['lat_accel'] = min(max(float(config['lat_accel']), MIN_LAT_ACCEL), MAX_LAT_ACCEL)
@@ -101,7 +111,7 @@ def allowed_speed(distance: float, target: float, decel: float, offset: float = 
   return math.sqrt(target * target + 2.0 * decel * max(distance - offset, 0.0))
 
 
-def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tuple[float, str, float] | None:
+def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float, yield_ok: bool = True) -> tuple[float, str, float] | None:
   """(speed cap in m/s, kind of the zone that sets it, its deceleration), or None when no zone limits the speed."""
   best = None
   for zone in zones:
@@ -113,6 +123,11 @@ def compute_cap(zones: list[dict], config: dict, v_ego: float, age: float) -> tu
       continue
     offset = REACH_EARLY_M if zone['kind'] in EARLY_KINDS else BRAKING_OFFSET_M
     decel = max(config['decel'], KIND_DECEL.get(zone['kind'], 0.0))
+    if zone['kind'] == 'roundabout':
+      offset, decel = ROUNDABOUT_REACH_M, max(decel, config['roundabout_decel'])
+      yield_v = config['roundabout_yield_kph'] * CV.KPH_TO_MS
+      if not yield_ok and yield_v > 0.0:  # wait at the entry for the driver's OK
+        target = min(target, yield_v)
     cap = allowed_speed(start, target, decel, offset) if start > 0.0 else target
     if best is None or cap < best[0]:
       best = (cap, zone['kind'], decel)
@@ -157,8 +172,9 @@ class NavSpeedCap:
     self.config_time = time.monotonic()
     self.kind: str | None = None
     self.decel = 0.0  # the deceleration this cap asks for while it is the one lowering the speed, else 0
+    self.yield_ok = False  # roundabout: the driver pressed the gas near the entry = clear to go
 
-  def update(self, v_ego: float, v_target: float, a_target: float) -> tuple[float, float]:
+  def update(self, v_ego: float, v_target: float, a_target: float, gas_pressed: bool = False) -> tuple[float, float]:
     """Apply the cap to (v_target, a_target)."""
     if time.monotonic() - self.config_time > CONFIG_REFRESH_S:
       self.config, self.config_time = load_config(self.config_path), time.monotonic()
@@ -169,7 +185,12 @@ class NavSpeedCap:
       data = read_zones(self.zones_path, max_age=HOLD_AGE_S)
       if data is None:
         return v_target, a_target
-      cap = compute_cap(data[0], self.config, v_ego, data[1])
+      rings = [z for z in data[0] if z['kind'] == 'roundabout' and z['end'] - v_ego * data[1] >= -RELEASE_M]
+      if not rings or min(z['start'] for z in rings) - v_ego * data[1] > YIELD_FORGET_M:
+        self.yield_ok = False
+      elif gas_pressed and min(z['start'] for z in rings) - v_ego * data[1] < YIELD_CONFIRM_M:
+        self.yield_ok = True
+      cap = compute_cap(data[0], self.config, v_ego, data[1], self.yield_ok)
       v_new, a_new = apply_cap(v_target, a_target, cap, cap[2] if cap is not None else self.config['decel'])
     except Exception:
       cloudlog.exception("lightpilot: speed cap failed")
